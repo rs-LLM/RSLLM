@@ -28,3 +28,5 @@ Cargo.lock
 .diea/
 .vscode/
 .trae/
+
+**/*.DS_Store

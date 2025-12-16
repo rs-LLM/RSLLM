@@ -35,9 +35,11 @@ tokio = { version = "1", features = ["macros"] }  # 异步运行时
 # 序列化相关
 serde = { version = "1.0", features = ["derive"] }  # 序列化框架
 serde_json = "1.0"                                  # JSON序列化支持
+chrono = { version = "0.4", features = ["serde"] }  # 时间处理库
 
 # 日志系统
 log = "0.4"                                          # 日志库
+tracing = "0.1"                                      # 分布式日志追踪库
 # fast_log配置：启用 features = ["lz4", "zip", "gzip"]，修改 src/config/log.rs 中的 choose_packer() 函数，在 application.json5 中添加 log_pack_compress: "zip"
 fast_log = { version = "1.7" }                       # 高性能日志库
 
@@ -54,7 +56,7 @@ md5 = "0.7"                 # MD5哈希算法
 captcha = "0.0.9"           # 验证码生成
 
 # HTTP客户端和图像处理
-reqwest = { version = "0.12", features = ["json"] }  # HTTP客户端，使用rust-tls替换native tls
+reqwest = { version = "0.12", features = ["json", "stream"] }  # HTTP客户端，使用rust-tls替换native tls
 image = "0.25.0"                                    # 图像处理库
 futures-util = "0.3.21"                            # Future工具库
 parking_lot = "0.12.1"                             # 并发工具库
@@ -66,6 +68,14 @@ json5 = "1.3"              # JSON5解析器
 # 云存储（可选）
 aws-sdk-s3 = { version = "1.58.0", features = ["rt-tokio","rustls"], optional = true }  # AWS S3 SDK
 async-trait = "0.1.83"     # 异步trait支持
+
+# OpenAPI 文档依赖
+utoipa = { version = "5.0.0", features = ["axum_extras", "chrono", "uuid", "openapi_extensions"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
+utoipa-scalar = { version = "0.3.0", features = ["axum"] }
+
+# 其他未分类
+futures = "0.3.31"
 
 
 [build-dependencies]
