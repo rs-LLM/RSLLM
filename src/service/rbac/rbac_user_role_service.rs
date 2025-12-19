@@ -34,7 +34,7 @@ use std::collections::HashMap;
 
 // 用途：用户角色设置视图对象
 // 说明：用于返回用户及其角色的关联信息
-pub struct SetUserVO {
+#[derive(Clone)]pub struct SetUserVO {
     // 用途：用户ID
     // 说明：标识要设置角色的用户
     pub id: Option<String>,
@@ -45,6 +45,7 @@ pub struct SetUserVO {
 
 // 用途：用户角色服务结构体
 // 说明：封装用户角色关联的业务逻辑
+#[derive(Clone)]
 pub struct RbacUserRoleService {}
 
 impl RbacUserRoleService {

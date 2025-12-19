@@ -12,6 +12,7 @@ use crate::error::Result;
 
 /// 用途：系统认证服务
 /// 说明：处理系统认证相关业务逻辑
+#[derive(Clone)]
 pub struct SysAuthService {}
 
 impl SysAuthService {

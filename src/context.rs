@@ -15,6 +15,12 @@ use crate::service::{
     SysDictService,                  // 系统字典服务
     SysTrashService,                 // 系统回收站服务
     SysUserService,                  // 系统用户服务
+    // AI Hub 服务
+    PriceRuleService,                // 价格规则服务
+    QuotaService,                    // 配额管理服务
+    BillingService,                  // 计费服务
+    BillService,                     // 账单服务
+    // AnalyticsService,                // 统计分析服务 (暂未实现)
 };
 
 // 用途：导入RBatis结构体
@@ -44,7 +50,7 @@ macro_rules! pool {
     // 用途：宏定义
     // 说明：当调用pool!()宏时，返回全局上下文的数据库连接池引用
     () => {
-        &$crate::context::CONTEXT.rb
+        &*$crate::context::CONTEXT.rb
     };
 }
 
@@ -53,8 +59,8 @@ macro_rules! pool {
 pub struct ServiceContext {
     pub config: ApplicationConfig,                    // 用途：应用程序配置
                                                     // 说明：存储应用程序的所有配置信息
-    pub rb: RBatis,                                  // 用途：数据库连接池
-                                                    // 说明：提供数据库操作的连接管理
+    pub rb: Arc<RBatis>,                             // 用途：数据库连接池
+                                                     // 说明：提供数据库操作的连接管理
     pub cache_service: CacheService,                 // 用途：缓存服务
                                                     // 说明：提供缓存操作功能
     pub storage_service: StorageService,             // 用途：存储服务
@@ -74,7 +80,48 @@ pub struct ServiceContext {
     pub sys_auth_service: SysAuthService,            // 用途：系统认证服务
                                                     // 说明：处理认证相关的业务逻辑
     pub sys_trash_service: SysTrashService,          // 用途：系统回收站服务
-                                                    // 说明：处理回收站相关的业务逻辑
+                                                     // 说明：处理回收站相关的业务逻辑
+    
+    // AI Hub 服务
+    pub price_rule_service: PriceRuleService,        // 用途：价格规则服务
+                                                     // 说明：处理价格规则相关业务逻辑
+    pub quota_service: QuotaService,                 // 用途：配额管理服务
+                                                     // 说明：处理用户配额相关业务逻辑
+    pub billing_service: BillingService,             // 用途：计费服务
+                                                     // 说明：处理费用计算和配额检查
+    pub bill_service: BillService,                   // 用途：账单服务
+                                                     // 说明：处理账单生成和支付
+    // pub analytics_service: AnalyticsService,         // 用途：统计分析服务 (暂未实现)
+                                                     // 说明：处理用量统计和分析
+    
+    pub provider_registry: Arc<tokio::sync::RwLock<crate::providers::registry::ProviderRegistry>>, // 用途：供应商注册表
+                                                                               // 说明：管理和注册所有AI服务供应商
+}
+
+/// 用途：ServiceContext的Clone实现
+/// 说明：手动实现Clone，只克隆必要的部分
+impl Clone for ServiceContext {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            rb: self.rb.clone(),
+            cache_service: self.cache_service.clone(),
+            storage_service: self.storage_service.clone(),
+            sys_user_service: self.sys_user_service.clone(),
+            rbac_permission_service: self.rbac_permission_service.clone(),
+            rbac_role_service: self.rbac_role_service.clone(),
+            rbac_role_permission_service: self.rbac_role_permission_service.clone(),
+            rbac_user_role_service: self.rbac_user_role_service.clone(),
+            sys_dict_service: self.sys_dict_service.clone(),
+            sys_auth_service: self.sys_auth_service.clone(),
+            sys_trash_service: self.sys_trash_service.clone(),
+            price_rule_service: self.price_rule_service.clone(),
+            quota_service: self.quota_service.clone(),
+            billing_service: self.billing_service.clone(),
+            bill_service: self.bill_service.clone(),
+            provider_registry: self.provider_registry.clone(),
+        }
+    }
 }
 
 /// 用途：ServiceContext的方法实现
@@ -129,6 +176,38 @@ impl ServiceContext {
             self.rb.get_pool().expect("pool not init!").state().await
         );
     }
+    
+    /// 用途：初始化供应商注册表
+    /// 说明：从数据库加载供应商配置并初始化供应商注册表
+    pub async fn init_providers(&self) {
+        // 用途：输出供应商初始化日志
+        // 说明：告知用户正在初始化供应商注册表
+        log::info!("[rsllm] init providers...");
+        
+        // 用途：从数据库加载所有启用的供应商
+        // 说明：只加载启用状态的供应商配置
+        let rb = self.rb.clone();
+        let providers = match crate::domain::table::provider::Provider::select_all(&*rb).await {
+            Ok(providers) => providers,
+            Err(e) => {
+                log::error!("[rsllm] load providers from db fail: {}", e);
+                return;
+            }
+        };
+        
+        // 用途：初始化供应商注册表
+        // 说明：根据加载的供应商配置创建供应商实例并注册到注册表中
+        // 使用RwLock来修改provider_registry
+        let new_registry = crate::providers::registry::ProviderRegistry::from_db(&providers);
+        *self.provider_registry.write().await = new_registry;
+        
+        // 用途：输出供应商初始化成功日志
+        // 说明：告知用户供应商初始化成功，并显示注册的供应商数量
+        log::info!(
+            "[rsllm] init providers success! count = {}",
+            providers.len()
+        );
+    }
 }
 
 /// 用途：ServiceContext的默认实现
@@ -144,10 +223,7 @@ impl Default for ServiceContext {
         ServiceContext {
             // 用途：初始化RBatis实例
             // 说明：创建数据库连接池实例
-            rb: {
-                let rb = RBatis::new();
-                rb
-            },
+            rb: Arc::new(RBatis::new()),
             
             // 用途：初始化缓存服务
             // 说明：创建缓存服务实例，用于缓存数据
@@ -189,6 +265,33 @@ impl Default for ServiceContext {
             // 用途：初始化系统回收站服务
             // 说明：创建回收站服务实例，用于处理回收站相关业务
             sys_trash_service: SysTrashService::new(),
+            
+            // 用途：初始化价格规则服务
+            // 说明：创建价格规则服务实例，用于处理价格规则相关业务
+            price_rule_service: PriceRuleService {},
+            
+            // 用途：初始化配额管理服务
+            // 说明：创建配额管理服务实例，用于处理用户配额相关业务
+            quota_service: QuotaService {},
+            
+            // 用途：初始化计费服务
+            // 说明：创建计费服务实例，用于处理费用计算和配额检查
+            billing_service: BillingService {
+                quota_service: QuotaService {},
+                price_rule_service: PriceRuleService {},
+            },
+            
+            // 用途：初始化账单服务
+            // 说明：创建账单服务实例，用于处理账单生成和支付
+            bill_service: BillService {},
+            
+            // 用途：初始化统计分析服务
+            // 说明：创建统计分析服务实例，用于处理用量统计和分析
+            // analytics_service: AnalyticsService {}, // 暂未实现
+            
+            // 用途：初始化供应商注册表
+            // 说明：创建供应商注册表实例，用于管理和注册所有AI服务供应商
+            provider_registry: Arc::new(tokio::sync::RwLock::new(crate::providers::registry::ProviderRegistry::new())),
             
             // 用途：设置应用程序配置
             // 说明：将加载的配置赋值给服务上下文

@@ -46,6 +46,7 @@ use rbs::value;
 
 /// 用途：角色资源服务
 /// 说明：处理角色和权限的关联关系，如角色权限的添加、编辑、删除等
+#[derive(Clone)]
 pub struct RbacRolePermissionService {}
 
 impl RbacRolePermissionService {

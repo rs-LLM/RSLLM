@@ -13,6 +13,9 @@ use std::fmt::Debug;
 // 用途：导入Deref trait
 // 说明：用于实现StorageService的解引用，方便直接调用内部服务方法
 use std::ops::Deref;
+// 用途：导入Arc类型
+// 说明：用于包装Box<dyn Trait>以支持Clone
+use std::sync::Arc;
 
 // 用途：存储服务异步trait标记
 // 说明：表示该trait包含异步方法
@@ -36,10 +39,11 @@ pub trait IStorageService: Sync + Send + Debug {
 
 // 用途：存储服务包装器
 // 说明：用于封装不同的存储服务实现，提供统一的访问方式
+#[derive(Clone)]
 pub struct StorageService {
     // 用途：内部存储服务实例
     // 说明：使用Box<dyn IStorageService>实现多态，支持不同的存储后端
-    pub inner: Box<dyn IStorageService>,
+    pub inner: Arc<Box<dyn IStorageService>>,
 }
 
 // 用途：为StorageService实现Deref trait
@@ -52,7 +56,7 @@ impl Deref for StorageService {
     // 用途：实现解引用方法
     // 说明：返回内部存储服务的引用，用于直接调用其方法
     fn deref(&self) -> &Self::Target {
-        self.inner.as_ref()
+        &**self.inner
     }
 }
 
@@ -66,7 +70,7 @@ impl StorageService {
         // 说明：根据配置选择本地存储实现
         if storage == "local" {
             return Ok(Self {
-                inner: Box::new(FileLocalService::new()),
+                inner: Arc::new(Box::new(FileLocalService::new())),
             });
         } 
         // 用途：判断是否使用S3存储
@@ -77,9 +81,9 @@ impl StorageService {
             #[cfg(feature = "storage_s3")]
             {
                 return Ok(Self {
-                    inner: Box::new(crate::service::FileS3Service::new(
+                    inner: Arc::new(Box::new(crate::service::FileS3Service::new(
                         crate::service::S3Config::load(storage)?,
-                    )),
+                    ))),
                 });
             }
         }

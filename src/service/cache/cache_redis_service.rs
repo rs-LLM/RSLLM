@@ -14,13 +14,6 @@ use crate::service::ICacheService;
 // 说明：实现异步trait方法，支持异步缓存操作
 use async_trait::async_trait;
 
-// 用途：导入futures工具库
-// 说明：支持异步编程，虽然当前代码中未直接使用BoxFuture
-use futures_util::future::BoxFuture;
-
-// 用途：导入日志库
-// 说明：记录Redis操作过程中的错误信息
-use log::error;
 
 // 用途：导入Redis相关类型
 // 说明：使用Redis作为缓存存储，需要Redis客户端和连接类型

@@ -3,6 +3,7 @@ use rsllm::service::{FileS3Service, IStorageService, S3Config};
 
 #[cfg(feature = "storage_s3")]
 #[tokio::test]
+#[ignore = "需要运行MinIO服务在 http://127.0.0.1:9000"]
 async fn test_config_load() {
     let cfg = S3Config {
         bucket: "test".to_string(),
@@ -18,6 +19,7 @@ async fn test_config_load() {
 
 #[cfg(feature = "storage_s3")]
 #[tokio::test]
+#[ignore = "需要运行MinIO服务在 http://127.0.0.1:9000"]
 async fn test_oss_upload() {
     let server = FileS3Service::new(S3Config {
         bucket: "test".to_string(),
@@ -35,6 +37,7 @@ async fn test_oss_upload() {
 
 #[cfg(feature = "storage_s3")]
 #[tokio::test]
+#[ignore = "需要运行MinIO服务在 http://127.0.0.1:9000"]
 async fn test_oss_list() {
     let server = FileS3Service::new(S3Config {
         bucket: "test".to_string(),

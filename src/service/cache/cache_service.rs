@@ -22,13 +22,16 @@ use serde::Serialize;
 // 说明：用于JSON反序列化
 use serde::de::DeserializeOwned;
 
-// 用途：导入Debug特性
+//  用途：导入Debug特性
 // 说明：用于调试
 use std::fmt::Debug;
 
 // 用途：导入Duration类型
 // 说明：用于设置缓存过期时间
 use std::time::Duration;
+// 用途：导入Arc类型
+// 说明：用于包装Box<dyn Trait>以支持Clone
+use std::sync::Arc;
 
 /// 用途：缓存服务接口
 /// 说明：定义缓存服务的通用接口，支持不同的缓存实现
@@ -53,10 +56,11 @@ pub trait ICacheService: Sync + Send + Debug {
 
 /// 用途：缓存服务
 /// 说明：封装不同的缓存实现，提供统一的缓存操作接口
+#[derive(Clone)]
 pub struct CacheService {
     /// 用途：内部缓存服务实现
     /// 说明：根据配置选择不同的缓存实现
-    pub inner: Box<dyn ICacheService>,
+    pub inner: Arc<Box<dyn ICacheService>>,
 }
 
 impl CacheService {
@@ -75,7 +79,7 @@ impl CacheService {
             // 用途：创建内存缓存服务实例
             // 说明：返回内存缓存服务
             return Ok(Self {
-                inner: Box::new(MemCacheService::default()),
+                inner: Arc::new(Box::new(MemCacheService::default())),
             });
         // 用途：检查是否为Redis缓存
         // 说明：Redis缓存支持分布式和持久化
@@ -90,7 +94,7 @@ impl CacheService {
                 // 用途：创建Redis缓存服务实例
                 // 说明：返回Redis缓存服务
                 return Ok(Self {
-                    inner: Box::new(crate::service::RedisCacheService::new(&cache)?),
+                    inner: Arc::new(Box::new(crate::service::RedisCacheService::new(&cache)?)),
                 });
             }
         }

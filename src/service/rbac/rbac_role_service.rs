@@ -44,6 +44,7 @@ use std::collections::{HashMap, HashSet};
 
 /// 用途：角色服务
 /// 说明：处理角色相关业务逻辑，如角色的增删改查和权限管理
+#[derive(Clone)]
 pub struct RbacRoleService {}
 
 impl RbacRoleService {

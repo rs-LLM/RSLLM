@@ -19,3 +19,19 @@ pub mod responses;
 // 用途：导出使用统计相关VO
 // 说明：包含token使用量、费用统计等VO
 pub mod usage;
+
+// 用途：导出用量记录相关VO
+pub mod usage_log;
+pub use usage_log::*;
+
+// 用途：导出用户配额相关VO
+pub mod user_quota;
+pub use user_quota::*;
+
+// 用途：导出账单相关VO
+pub mod billing;
+pub use billing::*;
+
+// 用途：导出价格规则相关VO
+pub mod price_rule;
+pub use price_rule::*;

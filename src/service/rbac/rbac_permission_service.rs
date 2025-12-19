@@ -2,6 +2,7 @@
 // 说明：用于访问其他服务
 use crate::context::CONTEXT;
 
+
 // 用途：导入权限相关的数据传输对象
 // 说明：用于接收权限的分页查询和编辑请求参数
 use crate::domain::dto::rbac::{PermissionPageDTO, ResEditDTO};
@@ -36,6 +37,7 @@ use rbs::value;
 
 /// 用途：权限服务
 /// 说明：处理权限相关业务逻辑，如权限的增删改查
+#[derive(Clone)]
 pub struct RbacPermissionService {}
 
 impl RbacPermissionService {

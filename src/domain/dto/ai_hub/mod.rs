@@ -3,27 +3,50 @@
 // 用途：导出聊天完成相关DTO
 // 说明：包含聊天对话请求和推理配置等DTO
 pub mod chat;
+pub use chat::*;
 
 // 用途：导出文本完成相关DTO
 // 说明：包含文本生成请求等DTO
 pub mod completion;
+pub use completion::*;
 
 // 用途：导出消息内容相关DTO
 // 说明：包含聊天消息、角色定义、内容格式等DTO
 pub mod content;
+pub use content::*;
 
 // 用途：导出向量嵌入相关DTO
 // 说明：包含嵌入请求等DTO
 pub mod embeddings;
+pub use embeddings::*;
 
 // 用途：导出日志概率相关DTO
 // 说明：包含日志概率统计、令牌信息等DTO
 pub mod logprob;
+pub use logprob::*;
 
 // 用途：导出响应格式相关DTO
 // 说明：包含不同响应格式的定义和配置
 pub mod response_format;
+pub use response_format::*;
 
 // 用途：导出流式处理相关DTO
 // 说明：包含流式响应数据、分块处理等DTO
-pub mod streaming;
+pub mod streaming;  
+pub use streaming::*;
+
+// 用途：导出用量记录相关DTO
+pub mod usage_log;
+pub use usage_log::*;
+
+// 用途：导出用户配额相关DTO
+pub mod user_quota;
+pub use user_quota::*;
+
+// 用途：导出账单相关DTO
+pub mod billing;
+pub use billing::*;
+
+// 用途：导出价格规则相关DTO
+pub mod price_rule;
+pub use price_rule::*;

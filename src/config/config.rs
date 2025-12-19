@@ -11,6 +11,7 @@ use std::io::Read;
 /// 用途：应用程序配置结构体
 /// 说明：集中管理应用程序的所有配置项
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone)]
 pub struct ApplicationConfig {
     pub server_url: String,         // 用途：服务器监听地址
                                     // 说明：指定服务器启动时监听的IP和端口

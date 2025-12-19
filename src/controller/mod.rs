@@ -28,6 +28,11 @@ pub use rbac::*;
 pub mod sys;
 pub use sys::*;
 
+// 用途：导出AI Hub模块
+// 说明：允许其他模块访问AI Hub相关的控制器功能
+pub mod ai_hub;
+pub use ai_hub::*;
+
 /// 用途：为RespVO实现IntoResponse特性
 /// 说明：允许RespVO直接作为axum响应返回，简化控制器代码
 impl<T: Serialize + DeserializeOwned> IntoResponse for RespVO<T> {

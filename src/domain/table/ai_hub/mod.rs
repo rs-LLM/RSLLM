@@ -1,9 +1,22 @@
 // 用途：导出AI Hub存储相关模块
 
-// 用途：导出服务提供商相关表结构
-// 说明：包含AI服务提供商配置、模型定义、管道等表结构
-pub mod provider;
-
 // 用途：导出表初始化相关功能
 // 说明：包含数据库表同步和默认数据初始化逻辑
 pub mod tables_init;
+pub use tables_init::*;
+
+// 用途：导出用量记录表结构
+pub mod usage_log;
+pub use usage_log::*;
+
+// 用途：导出用户配额表结构
+pub mod user_quota;
+pub use user_quota::*;
+
+// 用途：导出账单表结构
+pub mod billing;
+pub use billing::*;
+
+// 用途：导出价格规则表结构
+pub mod price_rule;
+pub use price_rule::*;

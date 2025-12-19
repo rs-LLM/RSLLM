@@ -42,7 +42,7 @@ use rbs::value;
 
 // 用途：同步数据库表结构
 // 说明：根据表结构定义自动创建或更新数据库表
-pub async fn sync_tables(rb: &RBatis) {
+pub async fn sys_sync_tables(rb: &RBatis) {
     // 用途：获取日志拦截器
     // 说明：用于临时关闭日志输出
     let log_intercept = rb.get_intercept::<LogInterceptor>().expect("not find log interceptor");
@@ -121,7 +121,7 @@ pub async fn sync_tables(rb: &RBatis) {
 
 // 用途：初始化系统默认数据
 // 说明：创建默认管理员用户、角色和权限，确保系统能正常使用
-pub async fn sync_tables_data(rb: &RBatis) {
+pub async fn sys_sync_tables_data(rb: &RBatis) {
     // 用途：获取数据库连接
     // 说明：用于执行数据初始化操作
     let conn = rb.acquire().await.expect("init data fail");

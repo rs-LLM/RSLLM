@@ -68,6 +68,7 @@ const CACHE_KEY_RETRY: &'static str = "login:login_retry";
 
 /// 用途：后台用户服务
 /// 说明：处理用户相关业务逻辑，如登录、注册、权限管理等
+#[derive(Clone)]
 pub struct SysUserService {}
 
 impl SysUserService {

@@ -52,14 +52,17 @@ use std::fmt::Debug;
 // 用途：导入时间间隔类型
 // 说明：用于计算时间差，判断是否需要清理回收站
 use std::time::Duration;
+// 用途：导入Arc类型
+// 说明：用于包装Mutex以支持Clone
+use std::sync::Arc;
 
 // 用途：系统回收站服务结构体
 // 说明：封装回收站的业务逻辑，包括数据回收、清理和SQL拦截
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SysTrashService {
     // 用途：上次清理时间
     // 说明：用于定期清理超过保留期限的回收站数据
-    pub recycle_date: Mutex<DateTime>,
+    pub recycle_date: Arc<Mutex<DateTime>>,
 }
 
 // 用途：SysTrashService实现
@@ -69,7 +72,7 @@ impl SysTrashService {
     // 说明：初始化回收站服务，设置默认的清理日期
     pub fn new() -> Self {
         Self {
-            recycle_date: Mutex::new(DateTime::now()),
+            recycle_date: Arc::new(Mutex::new(DateTime::now())),
         }
     }
     

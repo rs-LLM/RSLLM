@@ -40,6 +40,7 @@ const DICT_KEY: &'static str = "sys_dict:all";
 
 /// 用途：字典服务
 /// 说明：处理字典相关业务逻辑
+#[derive(Clone)]
 pub struct SysDictService {}
 
 impl SysDictService {

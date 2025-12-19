@@ -4,5 +4,7 @@ pub mod controller;
 pub mod domain;
 pub mod error;
 pub mod middleware;
+pub mod providers;
+pub mod router;
 pub mod service;
 pub mod util;

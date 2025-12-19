@@ -1,12 +1,18 @@
 // 用途：导入AI处理管道相关结构体
 // 说明：用于初始化管道配置表结构
-use crate::domain::table::ai_hub::provider::{Pipeline, PipelinePluginConfig};
+use crate::domain::table::provider::{Pipeline, PipelinePluginConfig};
 // 用途：导入AI模型定义相关结构体
 // 说明：用于初始化模型定义表结构
-use crate::domain::table::ai_hub::provider::ModelDefinition;
+use crate::domain::table::provider::ModelDefinition;
 // 用途：导入AI服务提供商相关结构体
 // 说明：用于初始化提供商配置表结构
-use crate::domain::table::ai_hub::provider::Provider;
+use crate::domain::table::provider::Provider;
+// 用途：导入用量计费相关结构体
+// 说明：用于初始化用量记录、配额、账单、价格规则表结构
+use crate::domain::table::ai_hub::usage_log::AiHubUsageLog;
+use crate::domain::table::ai_hub::user_quota::AiHubUserQuota;
+use crate::domain::table::ai_hub::billing::AiHubBilling;
+use crate::domain::table::ai_hub::price_rule::AiHubPriceRule;
 // 用途：导入日志级别枚举
 // 说明：用于控制日志输出级别
 use log::LevelFilter;
@@ -33,7 +39,7 @@ use ulid::Ulid;
 
 // 用途：同步AI Hub相关数据库表结构
 // 说明：根据表结构定义自动创建或更新AI Hub相关的数据库表
-pub async fn sync_tables(rb: &RBatis) {
+pub async fn ai_hub_sync_tables(rb: &RBatis) {
     // 用途：获取日志拦截器
     // 说明：用于临时关闭日志输出
     let log_intercept = rb.get_intercept::<LogInterceptor>().expect("not find log interceptor");
@@ -75,6 +81,9 @@ pub async fn sync_tables(rb: &RBatis) {
         provider_type: Default::default(),
         config_details: Default::default(),
         enabled: Some(Default::default()),
+        base_price: Some(Default::default()),
+        context_price: Some(Default::default()),
+        output_price: Some(Default::default()),
         created_at: Some(Default::default()),
         updated_at: Some(Default::default()),
     };
@@ -120,11 +129,93 @@ pub async fn sync_tables(rb: &RBatis) {
         updated_at: Some(Default::default()),
     };
     let _ = RBatis::sync(&conn, mapper, &table, "pipeline_plugin_config").await;
+    
+    // 用途：同步用量记录表结构
+    // 说明：记录每次AI请求的详细用量信息
+    let table = AiHubUsageLog {
+        id: Some(Default::default()),
+        request_id: Some(Default::default()),
+        user_id: Some(Default::default()),
+        model_id: Some(Default::default()),
+        provider_id: Some(Default::default()),
+        input_tokens: Some(Default::default()),
+        output_tokens: Some(Default::default()),
+        total_tokens: Some(Default::default()),
+        input_cost: Some(Default::default()),
+        output_cost: Some(Default::default()),
+        total_cost: Some(Default::default()),
+        request_time: Some(Default::default()),
+        response_time: Some(Default::default()),
+        duration_ms: Some(Default::default()),
+        request_type: Default::default(),
+        status: Default::default(),
+        extra: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_usage_log").await;
+    
+    // 用途：同步用户配额表结构
+    // 说明：管理用户的配额和余额
+    let table = AiHubUserQuota {
+        id: Some(Default::default()),
+        user_id: Default::default(),
+        quota_type: Default::default(),
+        total_quota: Default::default(),
+        used_quota: Default::default(),
+        remaining_quota: Default::default(),
+        cycle_start: Some(Default::default()),
+        cycle_end: Some(Default::default()),
+        status: Default::default(),
+        warning_threshold: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_user_quota").await;
+    
+    // 用途：同步账单表结构
+    // 说明：记录周期性账单信息
+    let table = AiHubBilling {
+        id: Some(Default::default()),
+        bill_number: Default::default(),
+        user_id: Default::default(),
+        billing_cycle: Default::default(),
+        total_amount: Default::default(),
+        service_amount: Default::default(),
+        tax_amount: Default::default(),
+        total_requests: Default::default(),
+        total_tokens: Default::default(),
+        payment_status: Default::default(),
+        payment_time: Some(Default::default()),
+        bill_status: Default::default(),
+        remark: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_billing").await;
+    
+    // 用途：同步价格规则表结构
+    // 说明：管理动态价格规则
+    let table = AiHubPriceRule {
+        id: Some(Default::default()),
+        rule_name: Default::default(),
+        conditions: Some(Default::default()),
+        discount_rate: Some(Default::default()),
+        additional_rate: Some(Default::default()),
+        priority: Default::default(),
+        effective_start: Some(Default::default()),
+        effective_end: Some(Default::default()),
+        status: Default::default(),
+        description: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_price_rule").await;
 }
 
 // 用途：初始化AI Hub默认数据
 // 说明：创建默认的AI服务提供商、模型和管道配置，确保AI Hub功能能正常使用
-pub async fn sync_tables_data(rb: &RBatis) {
+pub async fn ai_hub_sync_tables_data(rb: &RBatis) {
     // 用途：获取数据库连接
     // 说明：用于执行数据初始化操作
     let conn = rb.acquire().await.expect("init ai_hub data fail");
@@ -154,6 +245,9 @@ pub async fn sync_tables_data(rb: &RBatis) {
                 "max_retries": 3
             }),
             enabled: Some(true),
+            base_price: Some(0.0),
+            context_price: Some(0.0),
+            output_price: Some(0.0),
             created_at: Some(DateTime::now()),
             updated_at: Some(DateTime::now()),
         },

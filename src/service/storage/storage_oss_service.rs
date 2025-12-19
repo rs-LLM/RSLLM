@@ -18,9 +18,6 @@ use aws_sdk_s3::primitives::ByteStream;
 // 说明：创建和配置S3客户端，用于与S3兼容存储服务交互
 use aws_sdk_s3::{Client, Config};
 
-// 用途：导入futures工具库
-// 说明：支持异步编程，虽然当前代码中未直接使用BoxFuture
-use futures_util::future::BoxFuture;
 
 // 用途：导入serde序列化和反序列化宏
 // 说明：支持结构体的JSON序列化和反序列化
