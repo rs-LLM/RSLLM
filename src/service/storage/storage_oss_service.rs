@@ -1,6 +1,6 @@
 // 用途：导入自定义错误类型Error
 // 说明：统一错误处理，确保所有错误都遵循相同的类型规范
-use crate::error::Error;
+use crate::error::{ApplicationError, ApplicationResult};
 
 // 用途：导入存储服务接口
 // 说明：实现存储服务的统一接口，支持多种存储实现的切换
@@ -81,19 +81,25 @@ pub struct S3Config {
 impl S3Config {
     // 用途：从字符串加载S3配置
     // 说明：将字符串形式的S3配置转换为S3Config结构体
-    pub fn load(arg: &str) -> Result<S3Config, Error> {
+    pub fn load(arg: &str) -> ApplicationResult<S3Config> {
         // 用途：检查配置字符串是否以"s3://"开头
         // 说明：确保配置格式正确，符合预期
         if arg.starts_with("s3://") {
             // 用途：解析JSON配置
             // 说明：将去掉"s3://"前缀的字符串解析为S3Config结构体
             let v = serde_json::from_str(arg.trim_start_matches("s3://"))
-                .map_err(|e| Error::from(e.to_string()))?;
+                .map_err(|e| ApplicationError::ConfigError {
+                    message: e.to_string(),
+                    key: Some("s3_config".to_string()),
+                })?;
             Ok(v)
         } else {
             // 用途：返回错误
             // 说明：配置格式不正确，缺少"s3://"前缀
-            Err(Error::from("s3 must have prefix 's3://'"))
+            Err(ApplicationError::ConfigError {
+                message: "s3 must have prefix 's3://'".to_string(),
+                key: Some("s3_config".to_string()),
+            })
         }
     }
 }
@@ -150,7 +156,7 @@ impl FileS3Service {
 impl IStorageService for FileS3Service {
     // 用途：上传文件到S3存储
     // 说明：将文件数据上传到S3兼容存储服务
-    async fn upload(&self, name: String, data: Vec<u8>) -> crate::error::Result<String> {
+    async fn upload(&self, name: String, data: Vec<u8>) -> ApplicationResult<String> {
         // 用途：去除路径开头的斜杠
         // 说明：S3键名不应以斜杠开头，避免路径错误
         let name = name.trim_start_matches("/").to_string();
@@ -169,7 +175,11 @@ impl IStorageService for FileS3Service {
             .body(ByteStream::from(data))
             .send()
             .await
-            .map_err(|e| Error::from(e.to_string()))?;
+            .map_err(|e| ApplicationError::StorageError {
+                message: e.to_string(),
+                operation: Some("put_object".to_string()),
+                bucket: Some(self.bucket.clone()),
+            })?;
         
         // 用途：返回文件路径
         // 说明：返回成功上传的文件路径，方便后续访问
@@ -178,7 +188,7 @@ impl IStorageService for FileS3Service {
 
     // 用途：从S3存储下载文件
     // 说明：从S3兼容存储服务下载文件数据
-    async fn download(&self, name: String) -> crate::error::Result<Vec<u8>> {
+    async fn download(&self, name: String) -> ApplicationResult<Vec<u8>> {
         // 用途：去除路径开头的斜杠
         // 说明：S3键名不应以斜杠开头，避免路径错误
         let name = name.trim_start_matches("/").to_string();
@@ -196,7 +206,11 @@ impl IStorageService for FileS3Service {
             .key(name.to_str().unwrap_or_default())
             .send()
             .await
-            .map_err(|e| Error::from(e.to_string()))?;
+            .map_err(|e| ApplicationError::StorageError {
+                message: e.to_string(),
+                operation: Some("get_object".to_string()),
+                bucket: Some(self.bucket.clone()),
+            })?;
         
         // 用途：创建数据缓冲区
         // 说明：用于存储下载的文件数据
@@ -213,7 +227,7 @@ impl IStorageService for FileS3Service {
 
     // 用途：列出S3存储中的文件
     // 说明：获取指定路径下的所有文件列表
-    async fn list(&self, name: String) -> crate::error::Result<Vec<String>> {
+    async fn list(&self, name: String) -> ApplicationResult<Vec<String>> {
         // 用途：去除路径开头的斜杠
         // 说明：S3键名不应以斜杠开头，避免路径错误
         let name = name.trim_start_matches("/").to_string();
@@ -231,7 +245,11 @@ impl IStorageService for FileS3Service {
             .prefix(name.to_str().unwrap_or_default())
             .send()
             .await
-            .map_err(|e| Error::from(e.to_string()))?;
+            .map_err(|e| ApplicationError::StorageError {
+                message: e.to_string(),
+                operation: Some("list_objects_v2".to_string()),
+                bucket: Some(self.bucket.clone()),
+            })?;
         
         // 用途：创建结果列表
         // 说明：用于存储文件列表
@@ -252,7 +270,7 @@ impl IStorageService for FileS3Service {
 
     // 用途：从S3存储删除文件
     // 说明：删除指定路径的文件
-    async fn remove(&self, name: String) -> crate::error::Result<()> {
+    async fn remove(&self, name: String) -> ApplicationResult<()> {
         // 用途：去除路径开头的斜杠
         // 说明：S3键名不应以斜杠开头，避免路径错误
         let name = name.trim_start_matches("/").to_string();
@@ -270,7 +288,11 @@ impl IStorageService for FileS3Service {
             .key(name.to_str().unwrap_or_default())
             .send()
             .await
-            .map_err(|e| Error::from(e.to_string()))?;
+            .map_err(|e| ApplicationError::StorageError {
+                message: e.to_string(),
+                operation: Some("delete_object".to_string()),
+                bucket: Some(self.bucket.clone()),
+            })?;
         
         // 用途：返回操作结果
         // 说明：返回成功删除的结果

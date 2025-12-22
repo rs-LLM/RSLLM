@@ -1,14 +1,13 @@
 //! 账单服务模块
 //! 提供账单生成、支付和查询功能
+use crate::error::{ApplicationError, ApplicationResult};
 use crate::domain::table::ai_hub::billing::AiHubBilling;
 use crate::domain::table::ai_hub::usage_log::AiHubUsageLog;
 use crate::domain::dto::billing::{UpdateBillingDTO, PayBillingDTO, BillingQueryDTO, BillingStatisticsQueryDTO};
 use crate::domain::vo::billing::{AiHubBillingVO, BillingOverviewVO, BillingStatisticsVO};
-use crate::error::Result;
 use crate::pool;
 use rbatis::rbdc::DateTime;
 use std::str::FromStr;
-use rand::Rng;
 
 /// 账单服务
 ///
@@ -20,7 +19,7 @@ impl BillService {
     /// 生成账单
     /// 
     /// 根据用户和周期统计用量并生成账单
-    pub async fn generate_bill(&self, user_id: &str, billing_cycle: &str) -> Result<String> {
+    pub async fn generate_bill(&self, user_id: &str, billing_cycle: &str) -> ApplicationResult<String> {
         // 查询账单周期内的用量记录
         let start_time = self.get_cycle_start_time(billing_cycle)?;
         let end_time = self.get_cycle_end_time(billing_cycle)?;
@@ -37,7 +36,11 @@ impl BillService {
         ).await?;
 
         if usage_logs.is_empty() {
-            return Err(Error::from("该周期内无有效用量记录"));
+            return Err(ApplicationError::BillingError {
+                message: "该周期内无有效用量记录".to_string(),
+                bill_id: None,
+                user_id: Some(user_id.to_string()),
+            });
         }
 
         // 检查是否已存在账单
@@ -50,27 +53,27 @@ impl BillService {
         ).await?;
 
         if !existing.is_empty() {
-            return Err(Error::from(format!(
-                "账单已存在: user_id={}, cycle={}", 
-                user_id, billing_cycle
-            )));
+            return Err(ApplicationError::BillingError {
+                message: format!("账单已存在: user_id={}, cycle={}", user_id, billing_cycle),
+                bill_id: None,
+                user_id: Some(user_id.to_string()),
+            });
         }
 
         // 统计费用
-        let total_amount: f64 = usage_logs.iter().map(|l| l.total_cost.unwrap_or(0.0)).sum();
+        let total_amount: f64 = usage_logs.iter().map(|l| l.total_cost).sum();
         let service_amount = total_amount; // 服务费用 = 总费用
         let tax_amount = 0.0; // 税费（可后续扩展）
         
         let total_requests = usage_logs.len() as i64;
-        let total_tokens: i64 = usage_logs.iter().map(|l| l.total_tokens.unwrap_or(0)).sum();
+        let total_tokens: i64 = usage_logs.iter().map(|l| l.total_tokens).sum();
 
         // 生成账单编号
-        let mut rng = rand::thread_rng();
         let bill_number = format!(
             "BILL{}{}{:04}",
             billing_cycle.replace("-", ""),
             user_id.chars().take(8).collect::<String>(),
-            rng.gen_range(0..10000)
+            rand::random::<u16>() % 10000
         );
 
         let bill = AiHubBilling {
@@ -91,13 +94,17 @@ impl BillService {
             updated_at: Some(DateTime::now()),
         };
 
-        let id = bill.id.clone().ok_or_else(|| Error::from("Failed to generate bill ID"))?;
+        let id = bill.id.clone().ok_or_else(|| ApplicationError::BusinessError {
+            message: "Failed to generate bill ID".to_string(),
+            code: Some("BILL_ID_GENERATION_FAILED".to_string()),
+            context: Some("Failed to generate bill ID after successful creation".to_string()),
+        })?;
         AiHubBilling::insert(pool!(), &bill).await?;
         Ok(id)
     }
 
     /// 支付账单
-    pub async fn pay_bill(&self, id: &str, _dto: PayBillingDTO) -> Result<()> {
+    pub async fn pay_bill(&self, id: &str, _dto: PayBillingDTO) -> ApplicationResult<()> {
         // 使用select_by_map替代select_by_id
         let mut bill = AiHubBilling::select_by_map(
             pool!(),
@@ -105,14 +112,26 @@ impl BillService {
         ).await?
         .first()
         .cloned()
-        .ok_or_else(|| Error::from("Bill not found"))?;
+        .ok_or_else(|| ApplicationError::NotFound {
+            message: "Bill not found".to_string(),
+            resource: Some("bill".to_string()),
+            id: Some(id.to_string()),
+        })?;
 
         if bill.payment_status == "paid" {
-            return Err(Error::from("账单已支付"));
+            return Err(ApplicationError::BillingError {
+                message: "账单已支付".to_string(),
+                bill_id: Some(id.to_string()),
+                user_id: Some(bill.user_id),
+            });
         }
 
         if bill.bill_status == "cancelled" {
-            return Err(Error::from("账单已取消"));
+            return Err(ApplicationError::BillingError {
+                message: "账单已取消".to_string(),
+                bill_id: Some(id.to_string()),
+                user_id: Some(bill.user_id),
+            });
         }
 
         // 更新支付状态
@@ -135,7 +154,7 @@ impl BillService {
     }
 
     /// 更新账单
-    pub async fn update_bill(&self, id: &str, dto: UpdateBillingDTO) -> Result<()> {
+    pub async fn update_bill(&self, id: &str, dto: UpdateBillingDTO) -> ApplicationResult<()> {
         // 使用select_by_map替代select_by_id
         let mut bill = AiHubBilling::select_by_map(
             pool!(),
@@ -143,7 +162,11 @@ impl BillService {
         ).await?
         .first()
         .cloned()
-        .ok_or_else(|| Error::from("Bill not found"))?;
+        .ok_or_else(|| ApplicationError::NotFound {
+            message: "Bill not found".to_string(),
+            resource: Some("bill".to_string()),
+            id: Some(id.to_string()),
+        })?;
 
         if let Some(total_amount) = dto.total_amount {
             bill.total_amount = total_amount;
@@ -164,7 +187,11 @@ impl BillService {
             bill.payment_status = payment_status;
         }
         if let Some(payment_time) = &dto.payment_time {
-            bill.payment_time = Some(DateTime::from_str(payment_time).map_err(|e| Error::from(format!("Invalid payment_time: {}", e)))?);
+            bill.payment_time = Some(DateTime::from_str(payment_time).map_err(|e| ApplicationError::ValidationError {
+                message: format!("Invalid payment_time: {}", e),
+                field: Some("payment_time".to_string()),
+                value: Some(payment_time.clone()),
+            })?);
         }
         if let Some(bill_status) = dto.bill_status {
             bill.bill_status = bill_status;
@@ -185,7 +212,7 @@ impl BillService {
     }
 
     /// 取消账单
-    pub async fn cancel_bill(&self, id: &str) -> Result<()> {
+    pub async fn cancel_bill(&self, id: &str) -> ApplicationResult<()> {
         // 使用select_by_map替代select_by_id
         let mut bill = AiHubBilling::select_by_map(
             pool!(),
@@ -193,10 +220,18 @@ impl BillService {
         ).await?
         .first()
         .cloned()
-        .ok_or_else(|| Error::from("Bill not found"))?;
+        .ok_or_else(|| ApplicationError::NotFound {
+            message: "Bill not found".to_string(),
+            resource: Some("bill".to_string()),
+            id: Some(id.to_string()),
+        })?;
 
         if bill.payment_status == "paid" {
-            return Err(Error::from("已支付的账单无法取消"));
+            return Err(ApplicationError::BillingError {
+                message: "已支付的账单无法取消".to_string(),
+                bill_id: Some(id.to_string()),
+                user_id: Some(bill.user_id),
+            });
         }
 
         bill.bill_status = "cancelled".to_string();
@@ -212,7 +247,7 @@ impl BillService {
     }
 
     /// 获取账单详情
-    pub async fn get_bill(&self, id: &str) -> Result<AiHubBillingVO> {
+    pub async fn get_bill(&self, id: &str) -> ApplicationResult<AiHubBillingVO> {
         // 使用select_by_map替代select_by_id
         let bill = AiHubBilling::select_by_map(
             pool!(),
@@ -220,12 +255,16 @@ impl BillService {
         ).await?
         .first()
         .cloned()
-        .ok_or_else(|| Error::from("Bill not found"))?;
+        .ok_or_else(|| ApplicationError::NotFound {
+            message: "Bill not found".to_string(),
+            resource: Some("bill".to_string()),
+            id: Some(id.to_string()),
+        })?;
         Ok(self.to_vo(bill))
     }
 
     /// 查询账单列表
-    pub async fn list_bills(&self, query: BillingQueryDTO) -> Result<Vec<AiHubBillingVO>> {
+    pub async fn list_bills(&self, query: BillingQueryDTO) -> ApplicationResult<Vec<AiHubBillingVO>> {
         // 构建查询条件
         let mut map = rbs::value! {};
 
@@ -248,7 +287,7 @@ impl BillService {
     }
 
     /// 获取账单概览
-    pub async fn get_overview(&self, user_id: &str) -> Result<BillingOverviewVO> {
+    pub async fn get_overview(&self, user_id: &str) -> ApplicationResult<BillingOverviewVO> {
         // 使用select_by_map替代select_by_wrapper
         let bills = AiHubBilling::select_by_map(
             pool!(),
@@ -281,7 +320,7 @@ impl BillService {
     }
 
     /// 账单统计
-    pub async fn statistics(&self, query: BillingStatisticsQueryDTO) -> Result<BillingStatisticsVO> {
+    pub async fn statistics(&self, query: BillingStatisticsQueryDTO) -> ApplicationResult<BillingStatisticsVO> {
         // 保存user_id副本，避免移动后无法使用
         let user_id = query.user_id.clone();
         // 构建基础查询条件
@@ -295,10 +334,18 @@ impl BillService {
             map["created_at >="] = rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(start_time.to_string())));
             map["created_at <="] = rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(end_time.to_string())));
         } else if let Some(start) = &query.start_time {
-            let start_dt = DateTime::from_str(start).map_err(|e| Error::from(format!("Invalid start_time: {}", e)))?;
+            let start_dt = DateTime::from_str(start).map_err(|e| ApplicationError::ValidationError {
+                message: format!("Invalid start_time: {}", e),
+                field: Some("start_time".to_string()),
+                value: Some(start.clone()),
+            })?;
             map["created_at >="] = rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(start_dt.to_string())));
             if let Some(end) = &query.end_time {
-                let end_dt = DateTime::from_str(end).map_err(|e| Error::from(format!("Invalid end_time: {}", e)))?;
+                let end_dt = DateTime::from_str(end).map_err(|e| ApplicationError::ValidationError {
+                    message: format!("Invalid end_time: {}", e),
+                    field: Some("end_time".to_string()),
+                    value: Some(end.clone()),
+                })?;
                 map["created_at <="] = rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(end_dt.to_string())));
             }
         }
@@ -344,7 +391,7 @@ impl BillService {
     }
 
     /// 获取周期开始时间
-    fn get_cycle_start_time(&self, billing_cycle: &str) -> Result<DateTime> {
+    fn get_cycle_start_time(&self, billing_cycle: &str) -> ApplicationResult<DateTime> {
         // 格式: 2024-01, 2024-Q1, 2024
         if billing_cycle.contains("-") {
             let parts: Vec<&str> = billing_cycle.split('-').collect();
@@ -352,67 +399,123 @@ impl BillService {
                 let year = parts[0];
                 let month = parts[1];
                 return DateTime::from_str(&format!("{}-{}-01 00:00:00", year, month))
-                    .map_err(|e| Error::from(format!("Invalid billing cycle format: {}", e)));
+                    .map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid billing cycle format: {}", e),
+                        field: Some("billing_cycle".to_string()),
+                        value: Some(billing_cycle.to_string()),
+                    });
             }
         } else if billing_cycle.contains("Q") {
             let parts: Vec<&str> = billing_cycle.split('Q').collect();
             if parts.len() == 2 {
                 let year = parts[0];
-                let quarter: i32 = parts[1].parse().map_err(|e| Error::from(format!("Invalid quarter: {}", e)))?;
+                let quarter: i32 = parts[1].parse().map_err(|e| ApplicationError::ValidationError {
+                    message: format!("Invalid quarter: {}", e),
+                    field: Some("billing_cycle".to_string()),
+                    value: Some(billing_cycle.to_string()),
+                })?;
                 let month = (quarter - 1) * 3 + 1;
                 return DateTime::from_str(&format!("{}-{:02}-01 00:00:00", year, month))
-                    .map_err(|e| Error::from(format!("Invalid billing cycle format: {}", e)));
+                    .map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid billing cycle format: {}", e),
+                        field: Some("billing_cycle".to_string()),
+                        value: Some(billing_cycle.to_string()),
+                    });
             }
         }
         
         // 默认按年处理
         DateTime::from_str(&format!("{}-01-01 00:00:00", billing_cycle))
-            .map_err(|e| Error::from(format!("Invalid billing cycle format: {}", e)))
+            .map_err(|e| ApplicationError::ValidationError {
+                message: format!("Invalid billing cycle format: {}", e),
+                field: Some("billing_cycle".to_string()),
+                value: Some(billing_cycle.to_string()),
+            })
     }
 
     /// 获取周期结束时间
-    fn get_cycle_end_time(&self, billing_cycle: &str) -> Result<DateTime> {
+    fn get_cycle_end_time(&self, billing_cycle: &str) -> ApplicationResult<DateTime> {
         let _start = self.get_cycle_start_time(billing_cycle)?;
         
         if billing_cycle.contains("-") {
             let parts: Vec<&str> = billing_cycle.split('-').collect();
             if parts.len() == 2 {
-                let year: i32 = parts[0].parse().map_err(|e| Error::from(format!("Invalid year: {}", e)))?;
-                let month: i32 = parts[1].parse().map_err(|e| Error::from(format!("Invalid month: {}", e)))?;
+                let year: i32 = parts[0].parse().map_err(|e| ApplicationError::ValidationError {
+                    message: format!("Invalid year: {}", e),
+                    field: Some("billing_cycle".to_string()),
+                    value: Some(billing_cycle.to_string()),
+                })?;
+                let month: i32 = parts[1].parse().map_err(|e| ApplicationError::ValidationError {
+                    message: format!("Invalid month: {}", e),
+                    field: Some("billing_cycle".to_string()),
+                    value: Some(billing_cycle.to_string()),
+                })?;
                 
                 if month == 12 {
                     return DateTime::from_str(&format!("{}-12-31 23:59:59", year))
-                        .map_err(|e| Error::from(format!("Invalid date: {}", e)));
+                        .map_err(|e| ApplicationError::ValidationError {
+                            message: format!("Invalid date: {}", e),
+                            field: Some("billing_cycle".to_string()),
+                            value: Some(billing_cycle.to_string()),
+                        });
                 } else {
                     return DateTime::from_str(&format!("{}-{:02}-01 23:59:59", year, month + 1))
-                        .map_err(|e| Error::from(format!("Invalid date: {}", e)));
+                        .map_err(|e| ApplicationError::ValidationError {
+                            message: format!("Invalid date: {}", e),
+                            field: Some("billing_cycle".to_string()),
+                            value: Some(billing_cycle.to_string()),
+                        });
                 }
             }
         } else if billing_cycle.contains("Q") {
             let parts: Vec<&str> = billing_cycle.split('Q').collect();
             if parts.len() == 2 {
-                let year: i32 = parts[0].parse().map_err(|e| Error::from(format!("Invalid year: {}", e)))?;
-                let quarter: i32 = parts[1].parse().map_err(|e| Error::from(format!("Invalid quarter: {}", e)))?;
+                let year: i32 = parts[0].parse().map_err(|e| ApplicationError::ValidationError {
+                    message: format!("Invalid year: {}", e),
+                    field: Some("billing_cycle".to_string()),
+                    value: Some(billing_cycle.to_string()),
+                })?;
+                let quarter: i32 = parts[1].parse().map_err(|e| ApplicationError::ValidationError {
+                    message: format!("Invalid quarter: {}", e),
+                    field: Some("billing_cycle".to_string()),
+                    value: Some(billing_cycle.to_string()),
+                })?;
                 let end_month = quarter * 3;
                 
                 if end_month == 12 {
                     return DateTime::from_str(&format!("{}-12-31 23:59:59", year))
-                        .map_err(|e| Error::from(format!("Invalid date: {}", e)));
+                        .map_err(|e| ApplicationError::ValidationError {
+                            message: format!("Invalid date: {}", e),
+                            field: Some("billing_cycle".to_string()),
+                            value: Some(billing_cycle.to_string()),
+                        });
                 } else {
                     return DateTime::from_str(&format!("{}-{:02}-01 23:59:59", year, end_month + 1))
-                        .map_err(|e| Error::from(format!("Invalid date: {}", e)));
+                        .map_err(|e| ApplicationError::ValidationError {
+                            message: format!("Invalid date: {}", e),
+                            field: Some("billing_cycle".to_string()),
+                            value: Some(billing_cycle.to_string()),
+                        });
                 }
             }
         }
         
         // 默认按年处理
-        let year: i32 = billing_cycle.parse().map_err(|e| Error::from(format!("Invalid year: {}", e)))?;
+        let year: i32 = billing_cycle.parse().map_err(|e| ApplicationError::ValidationError {
+            message: format!("Invalid year: {}", e),
+            field: Some("billing_cycle".to_string()),
+            value: Some(billing_cycle.to_string()),
+        })?;
         DateTime::from_str(&format!("{}-12-31 23:59:59", year))
-            .map_err(|e| Error::from(format!("Invalid date: {}", e)))
+            .map_err(|e| ApplicationError::ValidationError {
+                message: format!("Invalid date: {}", e),
+                field: Some("billing_cycle".to_string()),
+                value: Some(billing_cycle.to_string()),
+            })
     }
 
     /// 获取周期范围
-    fn get_period_range(&self, period: &str) -> Result<(DateTime, DateTime)> {
+    fn get_period_range(&self, period: &str) -> ApplicationResult<(DateTime, DateTime)> {
         let now = DateTime::now();
         let end_time = now.clone();
         
@@ -422,42 +525,66 @@ impl BillService {
                 let date_str = now.to_string();
                 let date = &date_str[..10];
                 DateTime::from_str(&format!("{} 00:00:00", date))
-                    .map_err(|e| Error::from(format!("Invalid date: {}", e)))?
+                    .map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid date: {}", e),
+                        field: Some("period".to_string()),
+                        value: Some(period.to_string()),
+                    })?
             }
             "weekly" => {
                 // 最近7天
                 let date_str = now.to_string();
                 let date = &date_str[..10];
                 DateTime::from_str(&format!("{} 00:00:00", date))
-                    .map_err(|e| Error::from(format!("Invalid date: {}", e)))?
+                    .map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid date: {}", e),
+                        field: Some("period".to_string()),
+                        value: Some(period.to_string()),
+                    })?
             }
             "monthly" => {
                 // 最近30天
                 let date_str = now.to_string();
                 let date = &date_str[..10];
                 DateTime::from_str(&format!("{} 00:00:00", date))
-                    .map_err(|e| Error::from(format!("Invalid date: {}", e)))?
+                    .map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid date: {}", e),
+                        field: Some("period".to_string()),
+                        value: Some(period.to_string()),
+                    })?
             }
             "quarterly" => {
                 // 最近90天
                 let date_str = now.to_string();
                 let date = &date_str[..10];
                 DateTime::from_str(&format!("{} 00:00:00", date))
-                    .map_err(|e| Error::from(format!("Invalid date: {}", e)))?
+                    .map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid date: {}", e),
+                        field: Some("period".to_string()),
+                        value: Some(period.to_string()),
+                    })?
             }
             "yearly" => {
                 // 最近365天
                 let date_str = now.to_string();
                 let date = &date_str[..10];
                 DateTime::from_str(&format!("{} 00:00:00", date))
-                    .map_err(|e| Error::from(format!("Invalid date: {}", e)))?
+                    .map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid date: {}", e),
+                        field: Some("period".to_string()),
+                        value: Some(period.to_string()),
+                    })?
             }
             _ => {
                 // 默认最近30天
                 let date_str = now.to_string();
                 let date = &date_str[..10];
                 DateTime::from_str(&format!("{} 00:00:00", date))
-                    .map_err(|e| Error::from(format!("Invalid date: {}", e)))?
+                    .map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid date: {}", e),
+                        field: Some("period".to_string()),
+                        value: Some(period.to_string()),
+                    })?
             }
         };
 
@@ -484,5 +611,3 @@ impl BillService {
         }
     }
 }
-
-use crate::error::Error;

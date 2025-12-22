@@ -27,6 +27,8 @@ pub struct CreateQuotaDTO {
 // 说明：用于更新现有的用户配额
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct UpdateQuotaDTO {
+    // 用途：配额ID
+    pub id: String,
     // 用途：总额度（分）
     pub total_quota: Option<f64>,
     // 用途：已用额度（分）
@@ -47,6 +49,8 @@ pub struct UpdateQuotaDTO {
 // 说明：用于给用户配额充值
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct RechargeQuotaDTO {
+    // 用途：用户ID
+    pub user_id: String,
     // 用途：充值金额（分）
     pub amount: f64,
     // 用途：备注
@@ -92,7 +96,7 @@ pub struct AllocateQuotaDTO {
     // 用途：配额类型
     pub quota_type: String,
     // 用途：分配额度（分）
-    pub allocate_amount: f64,
+    pub amount: f64,
     // 用途：是否覆盖现有配额
     pub overwrite: Option<bool>,
     // 用途：备注

@@ -31,6 +31,8 @@ pub struct CreateBillingDTO {
 // 说明：用于更新现有的账单
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct UpdateBillingDTO {
+    // 用途：账单ID
+    pub billing_id: String,
     // 用途：总费用（分）
     pub total_amount: Option<f64>,
     // 用途：服务费用（分）
@@ -55,12 +57,24 @@ pub struct UpdateBillingDTO {
 // 说明：用于账单支付操作
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct PayBillingDTO {
+    // 用途：账单ID
+    pub billing_id: String,
     // 用途：支付方式
     pub payment_method: String,
     // 用途：支付流水号
     pub payment_reference: Option<String>,
     // 用途：支付备注
     pub payment_remark: Option<String>,
+}
+
+// 用途：生成账单DTO
+// 说明：用于生成新的账单
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct GenerateBillDTO {
+    // 用途：用户ID
+    pub user_id: String,
+    // 用途：账单周期
+    pub billing_cycle: String,
 }
 
 // 用途：账单查询DTO

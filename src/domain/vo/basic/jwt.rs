@@ -1,11 +1,11 @@
 // 用途：导入自定义错误类型
 // 说明：用于JWT操作中的错误处理
-use crate::error::Error;
+use crate::error::{ApplicationError, ApplicationResult};
 // 用途：导入JWT错误类型
 // 说明：用于JWT验证时的错误匹配
 use jsonwebtoken::errors::ErrorKind;
 // 用途：导入JWT相关结构体和函数
-// 说明：用于生成和验证JWT令牌
+// 说明：生成和验证JWT令牌
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 // 用途：导入serde的序列化和反序列化特性
 // 说明：支持JWTToken的JSON序列化和反序列化，便于在网络中传输
@@ -38,21 +38,24 @@ impl JWTToken {
     // 用途：创建JWT令牌
     // 说明：将用户信息和权限编码为JWT令牌，用于身份验证
     // secret: JWT签名密钥，用于保证令牌的完整性和真实性
-    pub fn create_token(&self, secret: &str) -> Result<String, Error> {
+    pub fn create_token(&self, secret: &str) -> ApplicationResult<String> {
         match encode(
             &Header::default(),
             self,
             &EncodingKey::from_secret(secret.as_ref()),
         ) {
             Ok(t) => Ok(t),
-            Err(_) => Err(Error::from("JWTToken encode fail!")),
+            Err(_) => Err(ApplicationError::TokenError {
+                message: "JWTToken encode fail!".to_string(),
+                kind: Some("encode".to_string()),
+            }),
         }
     }
     
     // 用途：验证JWT令牌的有效性
     // 说明：检查令牌是否被篡改、是否过期等，确保令牌的合法性
     // secret: JWT签名密钥，用于验证令牌签名
-    pub fn verify(secret: &str, token: &str) -> Result<JWTToken, Error> {
+    pub fn verify(secret: &str, token: &str) -> ApplicationResult<JWTToken> {
         let mut validation = Validation::default();
         validation.leeway = 0;
         match decode::<JWTToken>(
@@ -62,10 +65,22 @@ impl JWTToken {
         ) {
             Ok(c) => Ok(c.claims),
             Err(err) => match *err.kind() {
-                ErrorKind::InvalidToken => return Err(Error::from("InvalidToken")),
-                ErrorKind::InvalidIssuer => return Err(Error::from("InvalidIssuer")),
-                ErrorKind::ExpiredSignature => return Err(Error::from("ExpiredSignature")),
-                _ => return Err(Error::from("InvalidToken other errors")),
+                ErrorKind::InvalidToken => Err(ApplicationError::TokenError {
+                    message: "InvalidToken".to_string(),
+                    kind: Some("invalid_token".to_string()),
+                }),
+                ErrorKind::InvalidIssuer => Err(ApplicationError::TokenError {
+                    message: "InvalidIssuer".to_string(),
+                    kind: Some("invalid_issuer".to_string()),
+                }),
+                ErrorKind::ExpiredSignature => Err(ApplicationError::TokenError {
+                    message: "ExpiredSignature".to_string(),
+                    kind: Some("expired".to_string()),
+                }),
+                _ => Err(ApplicationError::TokenError {
+                    message: "InvalidToken other errors".to_string(),
+                    kind: Some("unknown".to_string()),
+                }),
             },
         }
     }
@@ -74,7 +89,7 @@ impl JWTToken {
     // 说明：延长令牌的有效期，避免用户频繁重新登录
     // secret: JWT签名密钥
     // jwt_exp: 令牌过期时间，单位为秒
-    pub fn refresh(&self, secret: &str, jwt_exp: usize) -> Result<String, Error> {
+    pub fn refresh(&self, secret: &str, jwt_exp: usize) -> ApplicationResult<String> {
         let mut jwt = self.clone();
         jwt.exp = jwt.exp + jwt_exp;
         jwt.create_token(&secret)
@@ -99,12 +114,12 @@ mod test {
     use std::time::Duration;
     // 用途：导入自定义错误类型
     // 说明：用于测试函数的错误处理
-    use crate::error::Error;
+    use crate::error::ApplicationError;
 
     // 用途：测试JWT功能
     // 说明：验证JWTToken的生成、验证和刷新功能是否正常
     #[test]
-    fn test_jwt() -> Result<(),Error>{
+    fn test_jwt() -> Result<(), ApplicationError>{
         let j = JWTToken {
             id: "1".to_string(),
             account: "189".to_string(),

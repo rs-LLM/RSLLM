@@ -23,6 +23,14 @@ use crate::service::{
     // AnalyticsService,                // 统计分析服务 (暂未实现)
 };
 
+// 用途：导入AI Hub服务结构体
+// 说明：用于模型和供应商管理服务
+use crate::service::ai_hub::{
+    ModelDefinitionServiceImpl,      // 模型定义服务实现
+    ProviderConfigServiceImpl,       // 供应商配置服务实现
+    EncryptionService,               // 加密服务
+};
+
 // 用途：导入RBatis结构体
 // 说明：用于数据库操作和连接池管理
 use rbatis::RBatis;
@@ -84,18 +92,24 @@ pub struct ServiceContext {
     
     // AI Hub 服务
     pub price_rule_service: PriceRuleService,        // 用途：价格规则服务
-                                                     // 说明：处理价格规则相关业务逻辑
+                                                      // 说明：处理价格规则相关业务逻辑
     pub quota_service: QuotaService,                 // 用途：配额管理服务
-                                                     // 说明：处理用户配额相关业务逻辑
+                                                      // 说明：处理用户配额相关业务逻辑
     pub billing_service: BillingService,             // 用途：计费服务
-                                                     // 说明：处理费用计算和配额检查
+                                                      // 说明：处理费用计算和配额检查
     pub bill_service: BillService,                   // 用途：账单服务
-                                                     // 说明：处理账单生成和支付
+                                                      // 说明：处理账单生成和支付
     // pub analytics_service: AnalyticsService,         // 用途：统计分析服务 (暂未实现)
-                                                     // 说明：处理用量统计和分析
+                                                      // 说明：处理用量统计和分析
+    
+    // 新增的AI Hub管理服务 - 使用Arc包装以便共享
+    pub model_definition_service: Arc<tokio::sync::RwLock<Option<ModelDefinitionServiceImpl>>>,  // 用途：模型定义服务
+                                                                                                 // 说明：管理AI模型的定义和配置
+    pub provider_config_service: Arc<tokio::sync::RwLock<Option<ProviderConfigServiceImpl>>>,    // 用途：供应商配置服务
+                                                                                                 // 说明：管理AI服务供应商的配置
     
     pub provider_registry: Arc<tokio::sync::RwLock<crate::providers::registry::ProviderRegistry>>, // 用途：供应商注册表
-                                                                               // 说明：管理和注册所有AI服务供应商
+                                                                                // 说明：管理和注册所有AI服务供应商
 }
 
 /// 用途：ServiceContext的Clone实现
@@ -119,6 +133,8 @@ impl Clone for ServiceContext {
             quota_service: self.quota_service.clone(),
             billing_service: self.billing_service.clone(),
             bill_service: self.bill_service.clone(),
+            model_definition_service: self.model_definition_service.clone(),
+            provider_config_service: self.provider_config_service.clone(),
             provider_registry: self.provider_registry.clone(),
         }
     }
@@ -208,6 +224,30 @@ impl ServiceContext {
             providers.len()
         );
     }
+    
+    /// 用途：初始化AI Hub管理服务
+    /// 说明：创建模型和供应商管理服务实例
+    pub async fn init_ai_hub_services(&self) {
+        log::info!("[rsllm] init AI Hub management services...");
+        
+        // 创建加密服务 - 从环境变量获取加密密钥
+        let encryption_key = std::env::var("ENCRYPTION_KEY")
+            .expect("ENCRYPTION_KEY environment variable must be set");
+        let encryption_service = EncryptionService::new(encryption_key.as_bytes())
+            .expect("Failed to create encryption service");
+        
+        // 初始化模型定义服务
+        let model_definition_service = ModelDefinitionServiceImpl::new(encryption_service.clone());
+        
+        // 初始化供应商配置服务
+        let provider_config_service = ProviderConfigServiceImpl::new(encryption_service);
+        
+        // 更新ServiceContext中的服务实例
+        *self.model_definition_service.write().await = Some(model_definition_service);
+        *self.provider_config_service.write().await = Some(provider_config_service);
+        
+        log::info!("[rsllm] AI Hub management services initialized successfully");
+    }
 }
 
 /// 用途：ServiceContext的默认实现
@@ -292,6 +332,11 @@ impl Default for ServiceContext {
             // 用途：初始化供应商注册表
             // 说明：创建供应商注册表实例，用于管理和注册所有AI服务供应商
             provider_registry: Arc::new(tokio::sync::RwLock::new(crate::providers::registry::ProviderRegistry::new())),
+            
+            // 用途：初始化AI Hub管理服务
+            // 说明：创建模型和供应商管理服务实例
+            model_definition_service: Arc::new(tokio::sync::RwLock::new(None)),  // 将在init_providers中初始化
+            provider_config_service: Arc::new(tokio::sync::RwLock::new(None)),   // 将在init_providers中初始化
             
             // 用途：设置应用程序配置
             // 说明：将加载的配置赋值给服务上下文

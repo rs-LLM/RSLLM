@@ -71,6 +71,10 @@ async fn main() -> std::io::Result<()> {
     // 说明：从数据库加载供应商配置并初始化供应商注册表
     CONTEXT.init_providers().await;
     
+    // 用途：初始化AI Hub管理服务
+    // 说明：创建模型和供应商管理服务实例
+    // CONTEXT.init_ai_hub_services().await; // 暂时注释
+    
     // 用途：输出服务器地址
     // 说明：告知用户服务器的访问地址
     log::info!(

@@ -3,7 +3,7 @@
 use crate::domain::table::ai_hub::price_rule::AiHubPriceRule;
 use crate::domain::dto::price_rule::{CreatePriceRuleDTO, UpdatePriceRuleDTO, PriceCalculationDTO, PriceRuleQueryDTO};
 use crate::domain::vo::price_rule::{AiHubPriceRuleVO, PriceCalculationVO, AppliedRuleVO, PriceRuleOverviewVO};
-use crate::error::Result;
+use crate::error::{ApplicationError, ApplicationResult};
 use crate::pool;
 use rbatis::rbdc::DateTime;
 use std::cmp::min;
@@ -17,14 +17,22 @@ pub struct PriceRuleService {}
 
 impl PriceRuleService {
     /// 创建价格规则
-    pub async fn create_rule(&self, dto: CreatePriceRuleDTO) -> Result<String> {
+    pub async fn create_rule(&self, dto: CreatePriceRuleDTO) -> ApplicationResult<String> {
         let effective_start = match &dto.effective_start {
-            Some(t) => Some(DateTime::from_str(t).map_err(|e| Error::from(format!("Invalid effective_start: {}", e)))?),
+            Some(t) => Some(DateTime::from_str(t).map_err(|e| ApplicationError::ValidationError {
+                message: format!("Invalid effective_start: {}", e),
+                field: Some("effective_start".to_string()),
+                value: Some(t.clone()),
+            })?),
             None => None,
         };
         
         let effective_end = match &dto.effective_end {
-            Some(t) => Some(DateTime::from_str(t).map_err(|e| Error::from(format!("Invalid effective_end: {}", e)))?),
+            Some(t) => Some(DateTime::from_str(t).map_err(|e| ApplicationError::ValidationError {
+                message: format!("Invalid effective_end: {}", e),
+                field: Some("effective_end".to_string()),
+                value: Some(t.clone()),
+            })?),
             None => None,
         };
 
@@ -43,16 +51,24 @@ impl PriceRuleService {
             updated_at: Some(DateTime::now()),
         };
 
-        let id = rule.id.clone().ok_or_else(|| Error::from("Failed to generate rule ID"))?;
+        let id = rule.id.clone().ok_or_else(|| ApplicationError::BusinessError {
+            message: "Failed to generate rule ID".to_string(),
+            code: Some("RULE_ID_GENERATION_FAILED".to_string()),
+            context: Some("Failed to generate rule ID after successful creation".to_string()),
+        })?;
         AiHubPriceRule::insert(pool!(), &rule).await?;
         Ok(id)
     }
 
     /// 更新价格规则
-    pub async fn update_rule(&self, id: &str, dto: UpdatePriceRuleDTO) -> Result<()> {
+    pub async fn update_rule(&self, id: &str, dto: UpdatePriceRuleDTO) -> ApplicationResult<()> {
         // 使用select_by_map替代select_by_id
         let rules = AiHubPriceRule::select_by_map(pool!(), rbs::value!("id": id)).await?;
-        let mut rule = rules.into_iter().next().ok_or_else(|| Error::from("Rule not found"))?;
+        let mut rule = rules.into_iter().next().ok_or_else(|| ApplicationError::NotFound {
+            message: "Rule not found".to_string(),
+            resource: Some("price_rule".to_string()),
+            id: Some(id.to_string()),
+        })?;
 
         if let Some(rule_name) = dto.rule_name {
             rule.rule_name = rule_name;
@@ -70,10 +86,18 @@ impl PriceRuleService {
             rule.priority = priority;
         }
         if let Some(effective_start) = &dto.effective_start {
-            rule.effective_start = Some(DateTime::from_str(effective_start).map_err(|e| Error::from(format!("Invalid effective_start: {}", e)))?);
+            rule.effective_start = Some(DateTime::from_str(effective_start).map_err(|e| ApplicationError::ValidationError {
+                message: format!("Invalid effective_start: {}", e),
+                field: Some("effective_start".to_string()),
+                value: Some(effective_start.clone()),
+            })?);
         }
         if let Some(effective_end) = &dto.effective_end {
-            rule.effective_end = Some(DateTime::from_str(effective_end).map_err(|e| Error::from(format!("Invalid effective_end: {}", e)))?);
+            rule.effective_end = Some(DateTime::from_str(effective_end).map_err(|e| ApplicationError::ValidationError {
+                message: format!("Invalid effective_end: {}", e),
+                field: Some("effective_end".to_string()),
+                value: Some(effective_end.clone()),
+            })?);
         }
         if let Some(status) = dto.status {
             rule.status = status;
@@ -89,21 +113,25 @@ impl PriceRuleService {
     }
 
     /// 删除价格规则
-    pub async fn delete_rule(&self, id: &str) -> Result<()> {
+    pub async fn delete_rule(&self, id: &str) -> ApplicationResult<()> {
         AiHubPriceRule::delete_by_map(pool!(), rbs::value!("id": id)).await?;
         Ok(())
     }
 
     /// 获取价格规则详情
-    pub async fn get_rule(&self, id: &str) -> Result<AiHubPriceRuleVO> {
+    pub async fn get_rule(&self, id: &str) -> ApplicationResult<AiHubPriceRuleVO> {
         let rules = AiHubPriceRule::select_by_map(pool!(), rbs::value!("id": id)).await?;
         let rule = rules.into_iter().next()
-            .ok_or_else(|| Error::from("Rule not found"))?;
+            .ok_or_else(|| ApplicationError::NotFound {
+                message: "Rule not found".to_string(),
+                resource: Some("price_rule".to_string()),
+                id: Some(id.to_string()),
+            })?;
         Ok(self.to_vo(rule))
     }
 
     /// 查询价格规则列表
-    pub async fn list_rules(&self, query: PriceRuleQueryDTO) -> Result<Vec<AiHubPriceRuleVO>> {
+    pub async fn list_rules(&self, query: PriceRuleQueryDTO) -> ApplicationResult<Vec<AiHubPriceRuleVO>> {
         // 使用select_by_map查询所有记录，然后手动筛选
         let all_rules = AiHubPriceRule::select_all(pool!()).await?;
         
@@ -136,7 +164,10 @@ impl PriceRuleService {
             if let Some(true) = query.active_only {
                 let now = DateTime::now();
                 let effective_start = rule.effective_start.clone().unwrap_or(
-                    DateTime::from_str("1970-01-01T00:00:00").map_err(|_| Error::from("Invalid default date")).unwrap_or_else(|_| DateTime::now())
+                    DateTime::from_str("1970-01-01T00:00:00").map_err(|_| ApplicationError::ConfigError {
+                        message: "Invalid default date".to_string(),
+                        key: Some("default_date".to_string()),
+                    })?
                 );
                 let effective_end = rule.effective_end.clone();
                 
@@ -173,7 +204,7 @@ impl PriceRuleService {
     }
 
     /// 获取价格规则概览
-    pub async fn get_overview(&self) -> Result<PriceRuleOverviewVO> {
+    pub async fn get_overview(&self) -> ApplicationResult<PriceRuleOverviewVO> {
         let now = DateTime::now();
         
         // 获取所有活跃规则
@@ -189,7 +220,10 @@ impl PriceRuleService {
         
         for rule in all_active_rules {
             let effective_start = rule.effective_start.unwrap_or(
-                DateTime::from_str("1970-01-01T00:00:00").map_err(|_| Error::from("Invalid default date")).unwrap_or_else(|_| DateTime::now())
+                DateTime::from_str("1970-01-01T00:00:00").map_err(|_| ApplicationError::ConfigError {
+                    message: "Invalid default date".to_string(),
+                    key: Some("default_date".to_string()),
+                })?
             );
             let effective_end = rule.effective_end;
             
@@ -228,7 +262,7 @@ impl PriceRuleService {
     }
 
     /// 计算价格
-    pub async fn calculate_price(&self, dto: PriceCalculationDTO) -> Result<PriceCalculationVO> {
+    pub async fn calculate_price(&self, dto: PriceCalculationDTO) -> ApplicationResult<PriceCalculationVO> {
         let base_price = dto.base_price;
         let input_tokens = dto.input_tokens;
         let output_tokens = dto.output_tokens;
@@ -277,7 +311,7 @@ impl PriceRuleService {
     }
 
     /// 获取匹配的规则
-    async fn get_matching_rules(&self, dto: &PriceCalculationDTO) -> Result<Vec<AiHubPriceRule>> {
+    async fn get_matching_rules(&self, dto: &PriceCalculationDTO) -> ApplicationResult<Vec<AiHubPriceRule>> {
         let now = DateTime::now();
         
         // 查询所有活跃规则
@@ -291,7 +325,10 @@ impl PriceRuleService {
         
         for rule in all_active_rules {
             let effective_start = rule.effective_start.clone().unwrap_or(
-                DateTime::from_str("1970-01-01T00:00:00").map_err(|_| Error::from("Invalid default date")).unwrap_or_else(|_| DateTime::now())
+                DateTime::from_str("1970-01-01T00:00:00").map_err(|_| ApplicationError::ConfigError {
+                    message: "Invalid default date".to_string(),
+                    key: Some("default_date".to_string()),
+                })?
             );
             let effective_end = rule.effective_end.clone();
             
@@ -396,5 +433,3 @@ impl PriceRuleService {
         }
     }
 }
-
-use crate::error::Error;

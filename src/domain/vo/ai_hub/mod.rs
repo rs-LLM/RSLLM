@@ -35,3 +35,11 @@ pub use billing::*;
 // 用途：导出价格规则相关VO
 pub mod price_rule;
 pub use price_rule::*;
+
+// 用途：导出统计分析相关VO
+pub mod analytics;
+pub use analytics::*;
+
+// 用途：导出流式响应相关VO
+pub mod streaming;
+pub use streaming::*;

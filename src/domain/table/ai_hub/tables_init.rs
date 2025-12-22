@@ -3,16 +3,19 @@
 use crate::domain::table::provider::{Pipeline, PipelinePluginConfig};
 // 用途：导入AI模型定义相关结构体
 // 说明：用于初始化模型定义表结构
-use crate::domain::table::provider::ModelDefinition;
+use crate::domain::table::ai_hub::model_definition::ModelDefinition;
 // 用途：导入AI服务提供商相关结构体
 // 说明：用于初始化提供商配置表结构
-use crate::domain::table::provider::Provider;
+use crate::domain::table::ai_hub::provider_config::ProviderConfig;
 // 用途：导入用量计费相关结构体
 // 说明：用于初始化用量记录、配额、账单、价格规则表结构
 use crate::domain::table::ai_hub::usage_log::AiHubUsageLog;
 use crate::domain::table::ai_hub::user_quota::AiHubUserQuota;
 use crate::domain::table::ai_hub::billing::AiHubBilling;
 use crate::domain::table::ai_hub::price_rule::AiHubPriceRule;
+// 用途：导入API密钥相关结构体
+// 说明：用于初始化API密钥表结构
+use crate::domain::table::ai_hub::api_key::ApiKey;
 // 用途：导入日志级别枚举
 // 说明：用于控制日志输出级别
 use log::LevelFilter;
@@ -73,31 +76,51 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
     // 说明：用于执行表同步操作
     let conn = rb.acquire().await.expect("connection database fail");
     
-    // 用途：同步AI服务提供商表结构
-    // 说明：存储各种AI服务提供商的基础配置信息，如OpenAI、Claude等
-    let table = Provider {
+    // 用途：同步供应商配置表结构
+    // 说明：存储各种AI服务供应商的基础配置信息
+    let table = ProviderConfig {
         id: Some(Default::default()),
         name: Default::default(),
         provider_type: Default::default(),
-        config_details: Default::default(),
+        api_base: Default::default(),
+        api_key_encrypted: Some(Default::default()),
+        auth_type: Some(Default::default()),
+        auth_config: Some(Default::default()),
+        default_input_price: Some(Default::default()),
+        default_output_price: Some(Default::default()),
+        rate_limit_enabled: Some(Default::default()),
+        max_concurrent_requests: Some(Default::default()),
+        circuit_breaker_enabled: Some(Default::default()),
+        failure_threshold: Some(Default::default()),
+        timeout_seconds: Some(Default::default()),
         enabled: Some(Default::default()),
-        base_price: Some(Default::default()),
-        context_price: Some(Default::default()),
-        output_price: Some(Default::default()),
+        status: Some(Default::default()),
+        description: Some(Default::default()),
+        documentation_url: Some(Default::default()),
         created_at: Some(Default::default()),
         updated_at: Some(Default::default()),
     };
-    let _ = RBatis::sync(&conn, mapper, &table, "provider").await;
+    let _ = RBatis::sync(&conn, mapper, &table, "provider_config").await;
     
     // 用途：同步AI模型定义表结构
     // 说明：存储AI模型的基础信息和配置参数
     let table = ModelDefinition {
         id: Some(Default::default()),
         key: Default::default(),
+        name: Default::default(),
         model_type: Default::default(),
-        provider_id: Some(Default::default()),
-        config_details: Some(Default::default()),
+        provider_id: Default::default(),
+        api_endpoint: Some(Default::default()),
+        api_key_encrypted: Some(Default::default()),
+        input_price: Default::default(),
+        output_price: Default::default(),
+        currency: Some(Default::default()),
+        max_tokens_per_request: Some(Default::default()),
+        max_requests_per_minute: Some(Default::default()),
         enabled: Some(Default::default()),
+        status: Some(Default::default()),
+        description: Some(Default::default()),
+        capabilities: Some(Default::default()),
         created_at: Some(Default::default()),
         updated_at: Some(Default::default()),
     };
@@ -134,24 +157,28 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
     // 说明：记录每次AI请求的详细用量信息
     let table = AiHubUsageLog {
         id: Some(Default::default()),
-        request_id: Some(Default::default()),
-        user_id: Some(Default::default()),
-        model_id: Some(Default::default()),
-        provider_id: Some(Default::default()),
-        input_tokens: Some(Default::default()),
-        output_tokens: Some(Default::default()),
-        total_tokens: Some(Default::default()),
-        input_cost: Some(Default::default()),
-        output_cost: Some(Default::default()),
-        total_cost: Some(Default::default()),
-        request_time: Some(Default::default()),
-        response_time: Some(Default::default()),
-        duration_ms: Some(Default::default()),
-        request_type: Default::default(),
-        status: Default::default(),
-        extra: Some(Default::default()),
+        request_id: Default::default(),
+        user_id: Default::default(),
+        model_id: Default::default(),
+        input_tokens: Default::default(),
+        output_tokens: Default::default(),
+        total_tokens: Default::default(),
+        input_price: Default::default(),
+        output_price: Default::default(),
+        total_cost: Default::default(),
+        currency: Some(Default::default()),
+        request_method: Some(Default::default()),
+        request_path: Some(Default::default()),
+        request_headers: Some(Default::default()),
+        request_body: Some(Default::default()),
+        status_code: Some(Default::default()),
+        response_time_ms: Some(Default::default()),
+        error_message: Some(Default::default()),
+        quota_deducted: Some(Default::default()),
+        quota_snapshot: Some(Default::default()),
+        ip_address: Some(Default::default()),
+        user_agent: Some(Default::default()),
         created_at: Some(Default::default()),
-        updated_at: Some(Default::default()),
     };
     let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_usage_log").await;
     
@@ -160,16 +187,18 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
     let table = AiHubUserQuota {
         id: Some(Default::default()),
         user_id: Default::default(),
-        quota_type: Default::default(),
         total_quota: Default::default(),
         used_quota: Default::default(),
         remaining_quota: Default::default(),
-        cycle_start: Some(Default::default()),
-        cycle_end: Some(Default::default()),
-        status: Default::default(),
+        quota_period: Some(Default::default()),
+        period_start: Some(Default::default()),
+        period_end: Some(Default::default()),
+        status: Some(Default::default()),
         warning_threshold: Some(Default::default()),
+        critical_threshold: Some(Default::default()),
         created_at: Some(Default::default()),
         updated_at: Some(Default::default()),
+        last_used_at: Some(Default::default()),
     };
     let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_user_quota").await;
     
@@ -211,6 +240,30 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
         updated_at: Some(Default::default()),
     };
     let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_price_rule").await;
+    
+    // 用途：同步API密钥表结构
+    // 说明：管理用户的API密钥和权限控制
+    let table = ApiKey {
+        id: Some(Default::default()),
+        key_hash: Default::default(),
+        user_id: Default::default(),
+        name: Some(Default::default()),
+        prefix: Some(Default::default()),
+        permissions: Some(Default::default()),
+        allowed_models: Some(Default::default()),
+        denied_models: Some(Default::default()),
+        rate_limit_enabled: Some(Default::default()),
+        max_requests_per_minute: Some(Default::default()),
+        ip_whitelist: Some(Default::default()),
+        ip_blacklist: Some(Default::default()),
+        enabled: Some(Default::default()),
+        status: Some(Default::default()),
+        expires_at: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+        last_used_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "api_key").await;
 }
 
 // 用途：初始化AI Hub默认数据
@@ -222,7 +275,7 @@ pub async fn ai_hub_sync_tables_data(rb: &RBatis) {
     
     // 用途：检查是否已存在默认提供商
     // 说明：避免重复初始化数据
-    if let Ok(v) = Provider::select_by_map(&conn, rbs::value! {"name":"OpenAI"}).await {
+    if let Ok(v) = ProviderConfig::select_by_map(&conn, rbs::value! {"name":"OpenAI"}).await {
         if v.len() > 0 {
             // 用途：如果提供商已存在，直接返回
             // 说明：避免重复初始化数据
@@ -233,21 +286,27 @@ pub async fn ai_hub_sync_tables_data(rb: &RBatis) {
     // 用途：插入默认的OpenAI提供商配置
     // 说明：提供基础的AI服务提供商配置
     let openai_provider_id = Ulid::new().to_string();
-    let _ = Provider::insert(
+    let _ = ProviderConfig::insert(
         &conn,
-        &Provider {
+        &ProviderConfig {
             id: Some(openai_provider_id.clone()),
             name: "OpenAI".to_string(),
             provider_type: "openai".to_string(),
-            config_details: serde_json::json!({
-                "api_base": "https://api.openai.com/v1",
-                "timeout": 30,
-                "max_retries": 3
-            }),
+            api_base: "https://api.openai.com/v1".to_string(),
+            api_key_encrypted: None,
+            auth_type: Some("api_key".to_string()),
+            auth_config: Some(serde_json::json!({})),
+            default_input_price: Some(0.01),
+            default_output_price: Some(0.03),
+            rate_limit_enabled: Some(true),
+            max_concurrent_requests: Some(10),
+            circuit_breaker_enabled: Some(true),
+            failure_threshold: Some(5),
+            timeout_seconds: Some(30),
             enabled: Some(true),
-            base_price: Some(0.0),
-            context_price: Some(0.0),
-            output_price: Some(0.0),
+            status: Some("active".to_string()),
+            description: Some("OpenAI AI Service Provider".to_string()),
+            documentation_url: Some("https://platform.openai.com/docs".to_string()),
             created_at: Some(DateTime::now()),
             updated_at: Some(DateTime::now()),
         },
@@ -262,16 +321,24 @@ pub async fn ai_hub_sync_tables_data(rb: &RBatis) {
         &ModelDefinition {
             id: Some(gpt_3_5_turbo_chat_id.clone()),
             key: "gpt-3.5-turbo".to_string(),
+            name: "GPT-3.5 Turbo".to_string(),
             model_type: "chat".to_string(),
-            provider_id: Some(openai_provider_id.clone()),
-            config_details: Some(serde_json::json!({
-                "max_tokens": 4096,
-                "temperature": 0.7,
-                "top_p": 1.0,
-                "frequency_penalty": 0.0,
-                "presence_penalty": 0.0
-            })),
+            provider_id: openai_provider_id.clone(),
+            api_endpoint: None,
+            api_key_encrypted: None,
+            input_price: 0.0015,
+            output_price: 0.002,
+            currency: Some("USD".to_string()),
+            max_tokens_per_request: Some(4096),
+            max_requests_per_minute: Some(60),
             enabled: Some(true),
+            status: Some("active".to_string()),
+            description: Some("OpenAI GPT-3.5 Turbo Chat Model".to_string()),
+            capabilities: Some(serde_json::json!([
+                "streaming",
+                "function_calling",
+                "json_mode"
+            ])),
             created_at: Some(DateTime::now()),
             updated_at: Some(DateTime::now()),
         },
@@ -286,14 +353,22 @@ pub async fn ai_hub_sync_tables_data(rb: &RBatis) {
         &ModelDefinition {
             id: Some(gpt_3_5_turbo_id.clone()),
             key: "gpt-3.5-turbo-instruct".to_string(),
+            name: "GPT-3.5 Turbo Instruct".to_string(),
             model_type: "completion".to_string(),
-            provider_id: Some(openai_provider_id.clone()),
-            config_details: Some(serde_json::json!({
-                "max_tokens": 4096,
-                "temperature": 0.7,
-                "top_p": 1.0
-            })),
+            provider_id: openai_provider_id.clone(),
+            api_endpoint: None,
+            api_key_encrypted: None,
+            input_price: 0.0015,
+            output_price: 0.002,
+            currency: Some("USD".to_string()),
+            max_tokens_per_request: Some(4096),
+            max_requests_per_minute: Some(60),
             enabled: Some(true),
+            status: Some("active".to_string()),
+            description: Some("OpenAI GPT-3.5 Turbo Instruct Model".to_string()),
+            capabilities: Some(serde_json::json!([
+                "streaming"
+            ])),
             created_at: Some(DateTime::now()),
             updated_at: Some(DateTime::now()),
         },

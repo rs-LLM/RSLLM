@@ -20,3 +20,15 @@ pub use billing::*;
 // 用途：导出价格规则表结构
 pub mod price_rule;
 pub use price_rule::*;
+
+// 用途：导出API密钥表结构
+pub mod api_key;
+pub use api_key::*;
+
+// 用途：导出模型定义表结构
+pub mod model_definition;
+pub use model_definition::*;
+
+// 用途：导出供应商配置表结构
+pub mod provider_config;
+pub use provider_config::*;

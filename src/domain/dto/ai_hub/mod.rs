@@ -50,3 +50,12 @@ pub use billing::*;
 // 用途：导出价格规则相关DTO
 pub mod price_rule;
 pub use price_rule::*;
+
+// 用途：导出统计分析相关DTO
+pub mod analytics;
+pub use analytics::*;
+
+// 用途：导出输入验证相关DTO
+// 说明：包含统一的输入参数验证功能
+pub mod validation;
+pub use validation::*;

@@ -18,6 +18,7 @@ use crate::domain::vo::RespVO;
 use crate::service::{TokenCounter, Content, TokenCountMeta};
 use crate::domain::vo::completion::{CompletionResponse, CompletionChoice};
 use crate::domain::vo::usage::Usage;
+use crate::domain::dto::validation::Validator;
 
 /// 文本补全接口
 ///
@@ -40,7 +41,25 @@ pub async fn completions(
     };
     log::info!("[AI Hub] User authenticated: {}", user_id);
     
-    // 2. Token计算
+    // 2. 输入验证
+    match Validator::validate_completion_request(
+        &req.model,
+        &req.prompt,
+        req.max_tokens,
+        req.temperature,
+        req.top_p,
+        req.frequency_penalty,
+        req.presence_penalty,
+        req.n,
+    ) {
+        Ok(_) => log::info!("[AI Hub] Input validation passed"),
+        Err(e) => {
+            log::warn!("[AI Hub] Input validation failed: {}", e);
+            return RespVO::from_error(format!("输入验证失败: {}", e));
+        }
+    }
+    
+    // 3. Token计算
     let token_meta = match calculate_tokens(&req) {
         Ok(meta) => meta,
         Err(e) => return RespVO::from_error(e.to_string()),
@@ -48,7 +67,7 @@ pub async fn completions(
     log::info!("[AI Hub] Token calculation: input={}, model={}",
         token_meta.input_tokens, req.model);
     
-    // 3. 预消费和配额检查
+    // 4. 预消费和配额检查
     let billing_service = &state.billing_service;
     let (base_input_price, base_output_price) = get_pricing(&req.model);
     
@@ -71,10 +90,10 @@ pub async fn completions(
     
     log::info!("[AI Hub] Pre-consumption check passed: cost={:.2}", fee.total_cost);
     
-    // 4. 调用AI服务（简化实现，返回成功响应）
+    // 5. 调用AI服务（简化实现，返回成功响应）
     let response = create_mock_response(&req, &token_meta);
     
-    // 5. 实际扣费和记录用量
+    // 6. 实际扣费和记录用量
     let duration_ms = start_time.elapsed().as_millis() as i64;
     let usage_log_id = match billing_service.deduct_quota_and_log(
         &fee,
@@ -92,7 +111,7 @@ pub async fn completions(
     
     log::info!("[AI Hub] Usage logged: {}", usage_log_id);
     
-    // 6. 返回响应
+    // 7. 返回响应
     RespVO::from(response)
 }
 
