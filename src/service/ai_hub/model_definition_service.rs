@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use rbatis::rbdc::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use utoipa::ToSchema;
 
 use crate::domain::table::ai_hub::model_definition::ModelDefinition;
 use crate::error::{Result, Error};
@@ -37,7 +38,7 @@ pub trait ModelDefinitionService: Send + Sync {
 }
 
 /// 创建模型请求
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateModelRequest {
     pub key: String,
     pub name: String,
@@ -57,7 +58,7 @@ pub struct CreateModelRequest {
 }
 
 /// 列表模型请求
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct ListModelsRequest {
     pub page: Option<i64>,
     pub size: Option<i64>,
@@ -69,7 +70,7 @@ pub struct ListModelsRequest {
 }
 
 /// 列表模型响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ListModelsResponse {
     pub items: Vec<ModelDefinition>,
     pub total: i64,
@@ -78,7 +79,7 @@ pub struct ListModelsResponse {
 }
 
 /// 更新模型请求
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct UpdateModelRequest {
     pub name: Option<String>,
     pub api_endpoint: Option<String>,
@@ -95,14 +96,14 @@ pub struct UpdateModelRequest {
 }
 
 /// 批量导入请求
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BulkImportRequest {
     pub provider_id: String,
     pub models: Vec<BulkImportModel>,
 }
 
 /// 批量导入模型
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BulkImportModel {
     pub key: String,
     pub name: String,
@@ -113,7 +114,7 @@ pub struct BulkImportModel {
 }
 
 /// 批量导入响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BulkImportResponse {
     pub imported: i32,
     pub failed: i32,

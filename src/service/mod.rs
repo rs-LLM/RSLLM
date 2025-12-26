@@ -11,8 +11,9 @@ mod rbac;
 mod storage;
 
 // 用途：声明系统服务模块
+
 // 原因：处理认证相关业务逻辑，如权限验证
-mod sys;
+pub mod sys;
 
 // 用途：声明AI Hub服务模块
 // 原因：处理AI相关的计费、配额、账单等业务逻辑

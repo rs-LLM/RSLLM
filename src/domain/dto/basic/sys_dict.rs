@@ -10,27 +10,35 @@ use rbatis::rbdc::DateTime;
 // 用途：导入serde的序列化和反序列化特性
 // 说明：支持JSON序列化和反序列化，方便在网络中传输数据
 use serde::{Deserialize, Serialize};
+// 用途：导入OpenAPI Schema支持
+// 说明：用于自动生成API文档
+use utoipa::ToSchema;
 
 // 用途：派生序列化、反序列化、克隆和调试特性
 // 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：字典分页查询DTO
 // 说明：封装字典分页查询所需的参数
 pub struct DictPageDTO {
     // 用途：页码
     // 说明：指定查询的页码，用于分页显示
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub page_no: Option<u64>,
     // 用途：每页大小
     // 说明：指定每页显示的数据条数，用于分页显示
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub page_size: Option<u64>,
     // 用途：字典名称
     // 说明：用于根据名称筛选字典
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     // 用途：字典编码
     // 说明：用于根据编码筛选字典
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     // 用途：字典状态
     // 说明：用于根据状态筛选字典（启用/禁用）
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<i32>,
 }
 
@@ -56,21 +64,25 @@ impl From<&DictPageDTO> for PageRequest {
 
 // 用途：派生序列化、反序列化、克隆和调试特性
 // 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：字典添加DTO
 // 说明：封装添加字典所需的参数
 pub struct DictAddDTO {
     // 用途：字典ID
     // 说明：指定字典的唯一标识
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     // 用途：字典名称
     // 说明：指定字典的名称
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     // 用途：字典编码
     // 说明：指定字典的编码
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     // 用途：字典状态
     // 说明：指定字典的状态（启用/禁用）
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<i32>,
 }
 
@@ -98,21 +110,25 @@ impl From<DictAddDTO> for SysDict {
 
 // 用途：派生序列化、反序列化、克隆和调试特性
 // 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：字典编辑DTO
 // 说明：封装编辑字典所需的参数
 pub struct DictEditDTO {
     // 用途：字典ID
     // 说明：指定要编辑的字典唯一标识
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     // 用途：字典名称
     // 说明：指定要编辑的字典名称
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     // 用途：字典编码
     // 说明：指定要编辑的字典编码
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     // 用途：字典状态
     // 说明：指定要编辑的字典状态（启用/禁用）
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<i32>,
 }
 

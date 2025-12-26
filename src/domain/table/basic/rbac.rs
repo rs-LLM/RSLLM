@@ -22,7 +22,7 @@ use std::hash::Hash;
 
 // 用途：权限资源表结构体
 // 说明：用于存储系统中的权限信息，包括菜单权限和API权限
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq, Default)]
 pub struct RbacPermission {
     // 用途：权限ID
     // 说明：权限的唯一标识符
@@ -36,6 +36,21 @@ pub struct RbacPermission {
     // 用途：菜单路径
     // 说明：用于前端路由和菜单渲染
     pub path: Option<String>,
+    // 用途：权限类型
+    // 说明：区分权限类型（menu/button/api）
+    pub permission_type: Option<String>,
+    // 用途：权限描述
+    // 说明：权限的详细描述
+    pub description: Option<String>,
+    // 用途：排序字段
+    // 说明：用于权限的排序显示
+    pub sort_order: Option<i32>,
+    // 用途：前端图标
+    // 说明：用于前端菜单图标显示
+    pub icon: Option<String>,
+    // 用途：状态
+    // 说明：权限启用/禁用状态（1启用，0禁用）
+    pub status: Option<i32>,
     // 用途：创建时间
     // 说明：记录权限的创建时间
     pub create_date: Option<DateTime>,
@@ -130,6 +145,40 @@ pub struct RbacUserRole {
 // 说明：自动实现增删改查等基本操作
 crud!(RbacUserRole {});
 
+// 用途：权限审计日志表结构体
+// 说明：用于记录权限的创建、修改、删除操作历史
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RbacPermissionAuditLog {
+    // 用途：审计日志ID
+    // 说明：审计日志的唯一标识符
+    pub id: Option<String>,
+    // 用途：权限ID
+    // 说明：被操作的权限ID
+    pub permission_id: Option<String>,
+    // 用途：操作类型
+    // 说明：操作类型（create/update/delete）
+    pub operation_type: Option<String>,
+    // 用途：变更前的值
+    // 说明：变更前的权限数据（JSON格式）
+    pub old_value: Option<String>,
+    // 用途：变更后的值
+    // 说明：变更后的权限数据（JSON格式）
+    pub new_value: Option<String>,
+    // 用途：操作人ID
+    // 说明：执行操作的用户ID
+    pub operator_id: Option<String>,
+    // 用途：操作人姓名
+    // 说明：执行操作的用户姓名
+    pub operator_name: Option<String>,
+    // 用途：操作时间
+    // 说明：记录操作的时间
+    pub create_time: Option<DateTime>,
+}
+
+// 用途：生成CRUD操作宏
+// 说明：自动实现增删改查等基本操作
+crud!(RbacPermissionAuditLog {});
+
 // 用途：同步RBAC相关表结构
 // 说明：负责初始化和同步数据库中的RBAC表结构
 pub async fn sync_tables(conn: &dyn Executor, mapper: &dyn ColumnMapper) {
@@ -140,6 +189,11 @@ pub async fn sync_tables(conn: &dyn Executor, mapper: &dyn ColumnMapper) {
         name: Some(Default::default()),
         permission: Some(Default::default()),
         path: Some(Default::default()),
+        permission_type: Some(Default::default()),
+        description: Some(Default::default()),
+        sort_order: Some(Default::default()),
+        icon: Some(Default::default()),
+        status: Some(Default::default()),
         create_date: Some(Default::default()),
     };
     let _ = RBatis::sync(conn, mapper, &table, "rbac_permission").await;
@@ -172,6 +226,20 @@ pub async fn sync_tables(conn: &dyn Executor, mapper: &dyn ColumnMapper) {
         create_date: Some(Default::default()),
     };
     let _ = RBatis::sync(conn, mapper, &table, "rbac_user_role").await;
+
+    // 用途：创建权限审计日志表结构
+    // 说明：初始化权限审计日志表，存储权限变更历史
+    let table = RbacPermissionAuditLog {
+        id: Some(Default::default()),
+        permission_id: Some(Default::default()),
+        operation_type: Some(Default::default()),
+        old_value: Some(Default::default()),
+        new_value: Some(Default::default()),
+        operator_id: Some(Default::default()),
+        operator_name: Some(Default::default()),
+        create_time: Some(Default::default()),
+    };
+    let _ = RBatis::sync(conn, mapper, &table, "rbac_permission_audit_log").await;
 }
 
 // 用途：IntoMap扩展trait

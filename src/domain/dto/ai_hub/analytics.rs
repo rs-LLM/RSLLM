@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct UserUsageStatsQueryDTO {
     /// 用户ID
-    pub user_id: String,
+    pub user_id: Option<String>,
     /// 开始时间 (可选)
     pub start_time: Option<String>,
     /// 结束时间 (可选)

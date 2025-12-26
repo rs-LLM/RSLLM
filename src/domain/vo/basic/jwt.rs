@@ -66,20 +66,20 @@ impl JWTToken {
             Ok(c) => Ok(c.claims),
             Err(err) => match *err.kind() {
                 ErrorKind::InvalidToken => Err(ApplicationError::TokenError {
-                    message: "InvalidToken".to_string(),
+                    message: "无效的访问令牌，请重新登录".to_string(),
                     kind: Some("invalid_token".to_string()),
                 }),
                 ErrorKind::InvalidIssuer => Err(ApplicationError::TokenError {
-                    message: "InvalidIssuer".to_string(),
+                    message: "无效的令牌发行者，请重新登录".to_string(),
                     kind: Some("invalid_issuer".to_string()),
                 }),
                 ErrorKind::ExpiredSignature => Err(ApplicationError::TokenError {
-                    message: "ExpiredSignature".to_string(),
+                    message: "访问令牌已过期，请重新登录".to_string(),
                     kind: Some("expired".to_string()),
                 }),
                 _ => Err(ApplicationError::TokenError {
-                    message: "InvalidToken other errors".to_string(),
-                    kind: Some("unknown".to_string()),
+                    message: "令牌验证失败，请重新登录".to_string(),
+                    kind: Some("verification_failed".to_string()),
                 }),
             },
         }
@@ -90,6 +90,13 @@ impl JWTToken {
     // secret: JWT签名密钥
     // jwt_exp: 令牌过期时间，单位为秒
     pub fn refresh(&self, secret: &str, jwt_exp: usize) -> ApplicationResult<String> {
+        let now = rbatis::rbdc::DateTime::now().unix_timestamp() as usize;
+        if self.exp <= now {
+            return Err(ApplicationError::TokenError {
+                message: "无法刷新已过期的令牌，请重新登录".to_string(),
+                kind: Some("expired_token_cannot_refresh".to_string()),
+            });
+        }
         let mut jwt = self.clone();
         jwt.exp = jwt.exp + jwt_exp;
         jwt.create_token(&secret)

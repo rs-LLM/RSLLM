@@ -33,6 +33,9 @@ pub struct SysUser {
     // 用途：用户状态
     // 说明：控制用户是否可用，1表示启用，0表示禁用
     pub state: Option<i32>,
+    // 用途：用户余额
+    // 说明：存储用户的账户余额，用于计费系统
+    pub balance: Option<f64>,
     // 用途：创建时间
     // 说明：记录用户的创建时间
     pub create_date: Option<DateTime>,

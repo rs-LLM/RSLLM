@@ -20,15 +20,15 @@ use futures::StreamExt;
 
 // 导入相关类型
 use crate::context::ServiceContext;
-use crate::domain::dto::chat::ChatCompletionRequest;
-use crate::domain::vo::RespVO;
+use crate::domain::dto::ai_hub::chat::ChatCompletionRequest;
+use crate::domain::vo::response::ApiResponse;
 use crate::service::{TokenCounter, Content, TokenCountMeta};
-use crate::domain::dto::content::{ChatMessageContent, ChatCompletionMessage};
-use crate::domain::vo::streaming::{ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta, WebSocketMessageType, WebSocketChatRequest, QuotaWarning};
+use crate::domain::dto::ai_hub::content::{ChatMessageContent, ChatCompletionMessage};
+use crate::domain::vo::ai_hub::streaming::{ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta, WebSocketMessageType, WebSocketChatRequest, QuotaWarning};
 
 /// 创建错误事件流
 fn create_error_stream(error_message: String) -> Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>> {
-    let error_response = RespVO::<()>::from_error(error_message);
+    let error_response = ApiResponse::<()>::error("500", &error_message);
     let error_event = Event::default().json_data(&error_response).unwrap_or_else(|_| Event::default().data("Unknown error"));
     let stream = futures::stream::once(async move { Ok::<Event, Infallible>(error_event) });
     Box::pin(stream)
@@ -122,7 +122,9 @@ pub async fn chat_completions_sse(
         // 模拟流式响应（实际应该调用AI服务）
         let response_content = "This is a simulated streaming response for testing purposes.";
         for chunk in response_content.split_whitespace() {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            // 移除延迟以提高性能，满足200ms响应时间要求
+            // 实际AI服务调用时，延迟由外部服务决定
+            // tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             
             let stream_chunk = ChatCompletionChunk {
                 id: request_id.clone(),
@@ -207,6 +209,20 @@ pub async fn chat_completions_sse(
 /// WebSocket聊天补全接口
 ///
 /// 提供WebSocket双向通信支持
+#[utoipa::path(
+    get,
+    path = "/api/v1/chat/completions/ws",
+    responses(
+        (status = 101, description = "WebSocket连接建立成功"),
+        (status = 401, description = "未授权"),
+        (status = 500, description = "服务器错误")
+    ),
+    tag = "streaming",
+    security(
+        ("api_key" = [])
+    )
+)]
+#[axum::debug_handler]
 pub async fn chat_completions_ws(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
@@ -354,7 +370,9 @@ async fn handle_ws_chat_request(
     if req.stream.unwrap_or(false) {
         let response_content = "This is a simulated WebSocket streaming response.";
         for chunk in response_content.split_whitespace() {
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            // 移除延迟以提高性能，满足200ms响应时间要求
+            // 实际AI服务调用时，延迟由外部服务决定
+            // tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             
             let stream_chunk = ChatCompletionChunk {
                 id: request_id.to_string(),

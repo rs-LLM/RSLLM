@@ -55,7 +55,7 @@ pub struct ToolCallChunk {
 }
 
 /// WebSocket消息类型
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub enum WebSocketMessageType {
     /// 连接建立
     Connected,
@@ -76,7 +76,7 @@ pub enum WebSocketMessageType {
 }
 
 /// WebSocket聊天请求
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct WebSocketChatRequest {
     /// 请求类型
     pub request_type: String,
@@ -93,7 +93,7 @@ pub struct WebSocketChatRequest {
 }
 
 /// WebSocket消息
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct WebSocketMessage {
     /// 角色
     pub role: String,
@@ -102,7 +102,7 @@ pub struct WebSocketMessage {
 }
 
 /// 配额警告
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct QuotaWarning {
     /// 用户ID
     pub user_id: String,
@@ -115,7 +115,7 @@ pub struct QuotaWarning {
 }
 
 /// 聊天完成（用于WebSocket完成消息）
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ChatCompletion {
     /// 响应ID
     pub id: String,
@@ -134,7 +134,7 @@ pub struct ChatCompletion {
 }
 
 /// 聊天完成选择器
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ChatCompletionChoice {
     /// 选择器索引
     pub index: i32,
@@ -145,7 +145,7 @@ pub struct ChatCompletionChoice {
 }
 
 /// 聊天完成消息
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ChatCompletionMessage {
     /// 角色
     pub role: String,
@@ -156,7 +156,7 @@ pub struct ChatCompletionMessage {
 }
 
 /// 工具调用
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ToolCall {
     /// 工具名称
     pub name: String,
@@ -165,7 +165,7 @@ pub struct ToolCall {
 }
 
 /// 使用统计
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct Usage {
     /// 输入tokens
     pub prompt_tokens: u32,

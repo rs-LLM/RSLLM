@@ -30,3 +30,9 @@ Cargo.lock
 .trae/
 
 **/*.DS_Store
+
+/changes
+
+/tests
+
+/rsllm.log

@@ -321,11 +321,11 @@ impl BillService {
 
     /// 账单统计
     pub async fn statistics(&self, query: BillingStatisticsQueryDTO) -> ApplicationResult<BillingStatisticsVO> {
-        // 保存user_id副本，避免移动后无法使用
-        let user_id = query.user_id.clone();
+        // 解包user_id，如果没有则使用默认值
+        let user_id = query.user_id.unwrap_or_else(|| "default_user".to_string());
         // 构建基础查询条件
         let mut map = rbs::value! {
-            "user_id": query.user_id
+            "user_id": user_id.clone()
         };
 
         if let Some(period) = &query.period {

@@ -12,7 +12,15 @@ use crate::domain::table::sys_dict::SysDict;
 
 // 用途：导入响应VO
 // 说明：用于统一HTTP响应格式
-use crate::domain::vo::RespVO;
+use crate::domain::vo::response::ApiResponse;
+
+// 用途：导入PageWrapper
+// 说明：用于分页响应的OpenAPI文档生成
+use crate::domain::vo::response::PageWrapper;
+
+// 用途：导入字典视图对象
+// 说明：用于返回字典数据
+use crate::domain::vo::basic::sys_dict::SysDictVO;
 
 // 用途：导入错误信息宏
 // 说明：用于生成错误信息
@@ -28,27 +36,60 @@ use axum::response::IntoResponse;
 
 /// 用途：分页查询字典
 /// 说明：处理字典的分页查询请求
+#[utoipa::path(
+    post,
+    path = "/api/v1/sys/dict/page",
+    request_body = DictPageDTO,
+    responses(
+        (status = 200, description = "查询成功", body = ApiResponse<PageWrapper<SysDictVO>>),
+        (status = 400, description = "参数错误", body = ApiResponse<PageWrapper<SysDictVO>>),
+        (status = 500, description = "服务器错误", body = ApiResponse<PageWrapper<SysDictVO>>)
+    ),
+    tag = "sys_dict"
+)]
 pub async fn page(page: Json<DictPageDTO>) -> impl IntoResponse {
     // 用途：调用字典服务分页查询字典
     // 说明：从数据库中分页查询字典数据
     let data = CONTEXT.sys_dict_service.page(&page.0).await;
+    // 用途：将结果转换为PageWrapper
+    // 说明：将rbatis Page转换为PageWrapper以支持OpenAPI文档生成
+    let wrapper_data: Result<PageWrapper<SysDictVO>, _> = data.map(|p| PageWrapper {
+        page: p.page_no,
+        page_size: p.page_size,
+        total: p.total,
+        records: p.records,
+    });
     // 用途：将结果转换为响应VO
     // 说明：统一响应格式，包含状态码、消息和数据
-    RespVO::from_result(data)
+    match wrapper_data {
+        Ok(result) => Json(ApiResponse::success(result)),
+        Err(e) => Json(ApiResponse::error("500", &e.to_string())),
+    }
 }
 
 /// 用途：添加字典
 /// 说明：处理字典的添加请求
+#[utoipa::path(
+    post,
+    path = "/api/v1/sys/dict/add",
+    request_body = DictAddDTO,
+    responses(
+        (status = 200, description = "添加成功", body = ApiResponse<u64>),
+        (status = 400, description = "参数错误", body = ApiResponse<u64>),
+        (status = 500, description = "服务器错误", body = ApiResponse<u64>)
+    ),
+    tag = "sys_dict"
+)]
 pub async fn add(mut arg: Json<DictAddDTO>) -> impl IntoResponse {
     // 用途：检查字典名称是否为空
     // 说明：字典名称是必填项
     if arg.name.is_none() {
-        return RespVO::<u64>::from_error(error_info!("empty"));
+        return Json(ApiResponse::<u64>::error("400", &error_info!("empty")));
     }
     // 用途：检查字典编码是否为空
     // 说明：字典编码是必填项，用于唯一标识字典
     if arg.code.is_none() {
-        return RespVO::<u64>::from_error(error_info!("empty"));
+        return Json(ApiResponse::<u64>::error("400", &error_info!("empty")));
     }
     // 用途：检查字典状态是否为空
     // 说明：字典状态为空时，默认设置为启用状态
@@ -67,11 +108,25 @@ pub async fn add(mut arg: Json<DictAddDTO>) -> impl IntoResponse {
     let _ = CONTEXT.sys_dict_service.update_cache().await;
     // 用途：将结果转换为响应VO
     // 说明：统一响应格式，包含状态码、消息和数据
-    RespVO::from_result(data)
+    match data {
+        Ok(result) => Json(ApiResponse::success(result)),
+        Err(e) => Json(ApiResponse::error("500", &e.to_string())),
+    }
 }
 
 /// 用途：更新字典
 /// 说明：处理字典的更新请求
+#[utoipa::path(
+    post,
+    path = "/api/v1/sys/dict/update",
+    request_body = DictEditDTO,
+    responses(
+        (status = 200, description = "更新成功", body = ApiResponse<u64>),
+        (status = 400, description = "参数错误", body = ApiResponse<u64>),
+        (status = 500, description = "服务器错误", body = ApiResponse<u64>)
+    ),
+    tag = "sys_dict"
+)]
 pub async fn update(arg: Json<DictEditDTO>) -> impl IntoResponse {
     // 用途：调用字典服务更新字典
     // 说明：更新数据库中的字典数据
@@ -81,11 +136,25 @@ pub async fn update(arg: Json<DictEditDTO>) -> impl IntoResponse {
     let _ = CONTEXT.sys_dict_service.update_cache().await;
     // 用途：将结果转换为响应VO
     // 说明：统一响应格式，包含状态码、消息和数据
-    RespVO::from_result(data)
+    match data {
+        Ok(result) => Json(ApiResponse::success(result)),
+        Err(e) => Json(ApiResponse::error("500", &e.to_string())),
+    }
 }
 
 /// 用途：删除字典
 /// 说明：处理字典的删除请求
+#[utoipa::path(
+    post,
+    path = "/api/v1/sys/dict/remove",
+    request_body = IdDTO,
+    responses(
+        (status = 200, description = "删除成功", body = ApiResponse<u64>),
+        (status = 400, description = "参数错误", body = ApiResponse<u64>),
+        (status = 500, description = "服务器错误", body = ApiResponse<u64>)
+    ),
+    tag = "sys_dict"
+)]
 pub async fn remove(arg: Json<IdDTO>) -> impl IntoResponse {
     // 用途：调用字典服务删除字典
     // 说明：从数据库中删除指定ID的字典
@@ -98,5 +167,8 @@ pub async fn remove(arg: Json<IdDTO>) -> impl IntoResponse {
     let _ = CONTEXT.sys_dict_service.update_cache().await;
     // 用途：将结果转换为响应VO
     // 说明：统一响应格式，包含状态码、消息和数据
-    RespVO::from_result(data)
+    match data {
+        Ok(result) => Json(ApiResponse::success(result)),
+        Err(e) => Json(ApiResponse::error("500", &e.to_string())),
+    }
 }

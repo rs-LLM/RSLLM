@@ -39,6 +39,18 @@ use captcha::filters::{Dots, Noise, Wave};
 /// Http Method GET
 /// example：
 /// http://localhost:8000/admin/captcha?account=18900000000
+#[utoipa::path(
+    get,
+    path = "/admin/captcha",
+    params(
+        ("account" = Option<String>, Query, description = "账号")
+    ),
+    responses(
+        (status = 200, description = "验证码图片", content_type = "image/png"),
+        (status = 400, description = "账号为空", body = String)
+    ),
+    tag = "captcha"
+)]
 pub async fn captcha(arg: Query<CatpchaDTO>) -> impl IntoResponse {
     // 用途：检查账号是否为空
     // 说明：验证码需要与账号关联，不能为空

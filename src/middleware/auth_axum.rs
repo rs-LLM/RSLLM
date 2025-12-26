@@ -23,7 +23,7 @@ use axum::{
     http,
     http::{HeaderMap, StatusCode},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
 };
 // 用途：导入Deref和DerefMut trait
 // 说明：用于JwtAuth结构体的解引用实现
@@ -35,47 +35,39 @@ pub const TOKEN_KEY: &'static str = "Authorization";
 
 // 用途：Axum认证中间件
 // 说明：用于验证请求中的JWT令牌，自动刷新即将过期的令牌
-pub async fn auth(mut request: Request, next: Next) -> Result<Response, StatusCode> {
-    // 用途：检查是否为调试模式
-    // 说明：调试模式下跳过认证，方便开发和测试
-    if !CONTEXT.config.debug() {
-        // 用途：从请求头中获取令牌
-        // 说明：验证请求是否包含有效的令牌
-        if let Ok(token) = get_token(&request.headers()) {
-            // 用途：验证令牌是否有效
-            // 说明：确保只有有效的令牌才能访问受保护的资源
-            if let Some(token) = token_is_valid(&token) {
-                // 用途：获取当前时间
-                // 说明：用于判断令牌是否即将过期
-                let now = rbatis::rbdc::DateTime::now().unix_timestamp() as usize;
-                // 用途：检查令牌是否即将过期
-                // 说明：如果令牌即将过期，自动刷新令牌，避免用户频繁重新登录
-                if (token.exp - now) < CONTEXT.config.jwt_refresh_token {
-                    // 用途：刷新令牌
-                    // 说明：生成新的令牌，延长有效期
-                    if let Ok(new_token) =
-                        token.refresh(&CONTEXT.config.jwt_secret, CONTEXT.config.jwt_exp)
-                    {
-                        // 用途：将新令牌添加到请求头中
-                        // 说明：方便后续中间件或处理函数使用新令牌
-                        if let Ok(new_header) = http::HeaderValue::from_str(&new_token) {
-                            request.headers_mut().insert(TOKEN_KEY, new_header);
-                        }
+pub async fn auth(mut request: Request, next: Next) -> Result<Response, Response> {
+    if let Ok(token) = get_token(&request.headers()) {
+        if let Some(token) = token_is_valid(&token) {
+            let now = rbatis::rbdc::DateTime::now().unix_timestamp() as usize;
+            if (token.exp - now) < CONTEXT.config.jwt_refresh_token {
+                if let Ok(new_token) =
+                    token.refresh(&CONTEXT.config.jwt_secret, CONTEXT.config.jwt_exp)
+                {
+                    if let Ok(new_header) = http::HeaderValue::from_str(&new_token) {
+                        request.headers_mut().insert(TOKEN_KEY, new_header);
                     }
                 }
-            } else {
-                // 用途：返回未授权状态
-                // 说明：令牌无效时拒绝请求
-                return Err(StatusCode::UNAUTHORIZED);
             }
         } else {
-            // 用途：返回未授权状态
-            // 说明：请求头中没有令牌时拒绝请求
-            return Err(StatusCode::UNAUTHORIZED);
+            let error_response = axum::Json(serde_json::json!({
+                "code": "401",
+                "msg": "无效的访问令牌，请重新登录",
+                "data": null
+            }));
+            let mut response = error_response.into_response();
+            *response.status_mut() = StatusCode::UNAUTHORIZED;
+            return Ok(response);
         }
+    } else {
+        let error_response = axum::Json(serde_json::json!({
+            "code": "401",
+            "msg": "缺少访问令牌，请先登录",
+            "data": null
+        }));
+        let mut response = error_response.into_response();
+        *response.status_mut() = StatusCode::UNAUTHORIZED;
+        return Ok(response);
     }
-    // 用途：继续处理请求
-    // 说明：令牌验证通过后，将请求传递给下一个中间件或处理函数
     let response = next.run(request).await;
     Ok(response)
 }
@@ -90,11 +82,12 @@ fn token_is_valid(token: &str) -> Option<JWTToken> {
 }
 
 // 用途：从请求头中获取令牌
-// 说明：提取Authorization头中的令牌字符串
+// 说明：提取Authorization头中的令牌字符串，去除Bearer前缀
 fn get_token(h: &HeaderMap) -> Result<&str, Error> {
     Ok(h.get(TOKEN_KEY)
         .map(|v| v.to_str().unwrap_or_default())
-        .unwrap_or_default())
+        .unwrap_or_default()
+        .trim_start_matches("Bearer "))
 }
 
 // 用途：Axum JWT认证提取器
@@ -126,28 +119,36 @@ impl<S: Sync> FromRequestParts<S> for JwtAuth {
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         // 用途：从请求头中获取令牌
-        // 说明：提取Authorization头中的令牌字符串
+        // 说明：提取Authorization头中的令牌字符串，去除Bearer前缀
         if let Some(auth_header) = parts.headers.get(TOKEN_KEY) {
             if let Ok(auth_str) = auth_header.to_str() {
+                // 用途：去除Bearer前缀
+                // 说明：确保令牌格式正确
+                let token = auth_str.trim_start_matches("Bearer ");
                 // 用途：验证令牌
                 // 说明：确保令牌的有效性
-                match checked_token(auth_str) {
+                match checked_token(token) {
                     Ok(v) => Ok(JwtAuth(v)),
-                    Err(e) => Err((
-                        StatusCode::UNAUTHORIZED,
-                        format!("Invalid authorization header={}", e),
-                    )),
+                    Err(e) => {
+                        let error_message = match e.to_string().as_str() {
+                            "无效的访问令牌，请重新登录" => "无效的访问令牌，请重新登录".to_string(),
+                            "无效的令牌发行者，请重新登录" => "无效的令牌发行者，请重新登录".to_string(),
+                            "访问令牌已过期，请重新登录" => "访问令牌已过期，请重新登录".to_string(),
+                            _ => "令牌验证失败，请重新登录".to_string(),
+                        };
+                        Err((StatusCode::UNAUTHORIZED, error_message))
+                    }
                 }
             } else {
                 Err((
                     StatusCode::UNAUTHORIZED,
-                    "Invalid authorization header".to_string(),
+                    "缺少访问令牌，请先登录".to_string(),
                 ))
             }
         } else {
             Err((
                 StatusCode::UNAUTHORIZED,
-                "Authorization header missing".to_string(),
+                "缺少访问令牌，请先登录".to_string(),
             ))
         }
     }

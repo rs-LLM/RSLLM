@@ -81,7 +81,7 @@ async-trait = "0.1.83"     # 异步trait支持
 
 # OpenAPI 文档依赖
 utoipa = { version = "5.0.0", features = ["axum_extras", "chrono", "uuid", "openapi_extensions"] }
-utoipa-swagger-ui = { version = "8", features = ["axum"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
 utoipa-scalar = { version = "0.3.0", features = ["axum"] }
 
 # 其他未分类

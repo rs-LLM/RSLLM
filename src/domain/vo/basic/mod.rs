@@ -10,6 +10,14 @@ pub mod rbac;
 // 说明：允许其他模块访问登录相关的VO
 pub mod sign_in;
 
+// 用途：导出刷新令牌相关VO模块
+// 说明：允许其他模块访问刷新令牌相关的VO
+pub mod refresh_token;
+
+// 用途：导出登录VO模块
+// 说明：允许其他模块访问登录VO
+pub mod login;
+
 // 用途：导出系统字典相关VO模块
 // 说明：允许其他模块访问系统字典相关的VO
 pub mod sys_dict;
@@ -17,6 +25,10 @@ pub mod sys_dict;
 // 用途：导出系统用户相关VO模块
 // 说明：允许其他模块访问系统用户相关的VO
 pub mod sys_user;
+
+// 用途：导出系统组织相关VO模块
+// 说明：允许其他模块访问系统组织相关的VO
+pub mod sys_organization;
 
 // 用途：重导出JWT相关VO
 // 说明：方便其他模块直接使用，无需嵌套导入
@@ -26,9 +38,25 @@ pub use jwt::*;
 // 说明：方便其他模块直接使用，无需嵌套导入
 pub use sign_in::*;
 
+// 用途：重导出刷新令牌相关VO
+// 说明：方便其他模块直接使用，无需嵌套导入
+pub use refresh_token::*;
+
+// 用途：重导出登录VO
+// 说明：方便其他模块直接使用，无需嵌套导入
+pub use login::*;
+
 // 用途：重导出系统字典相关VO
 // 说明：方便其他模块直接使用，无需嵌套导入
 pub use sys_dict::*;
+
+// 用途：重导出系统用户相关VO
+// 说明：方便其他模块直接使用，无需嵌套导入
+pub use sys_user::*;
+
+// 用途：重导出RBAC相关VO
+// 说明：方便其他模块直接使用，无需嵌套导入
+pub use rbac::*;
 
 // 用途：导入全局上下文
 // 说明：用于访问配置信息
@@ -45,6 +73,9 @@ use serde::de::DeserializeOwned;
 // 用途：导入序列化和反序列化特性
 // 说明：用于实现VO的序列化和反序列化
 use serde::{Deserialize, Serialize};
+// 用途：导入OpenAPI Schema支持
+// 说明：用于自动生成API文档
+use utoipa::ToSchema;
 
 /// 用途：成功状态码
 /// 说明：表示API请求成功
@@ -56,7 +87,7 @@ pub const CODE_FAIL: &str = "-1";
 
 /// 用途：HTTP接口返回模型结构
 /// 说明：提供统一的JSON数据结构，包含code、msg、data等基础字段
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct RespVO<T> {
     /// 用途：状态码
     /// 说明：表示请求的处理结果（成功/失败）

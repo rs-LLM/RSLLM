@@ -3,13 +3,36 @@
 use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, Deserializer};
 // 用途：导入JSON序列化支持
 // 说明：用于权限和模型列表的JSON存储
 use serde_json;
 // 用途：导入rbatis的CRUD宏
 // 说明：用于自动生成增删改查操作
 use rbatis::{crud};
+
+// 用途：自定义反序列化函数，支持从整数或布尔值反序列化为布尔类型
+// 说明：兼容数据库中存储的整数1/0和布尔值true/false
+fn deserialize_bool_from_int_or_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // 使用serde_json::Value作为中间层
+    let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+    
+    match value {
+        serde_json::Value::Bool(b) => Ok(Some(b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Some(i != 0))
+            } else {
+                Ok(None)
+            }
+        }
+        serde_json::Value::Null => Ok(None),
+        _ => Ok(None),
+    }
+}
 
 // 用途：API密钥表结构体
 // 说明：用于存储和管理用户的API密钥，支持权限控制和安全策略
@@ -41,6 +64,7 @@ pub struct ApiKey {
     pub denied_models: Option<serde_json::Value>,
     // 用途：是否启用限流
     // 说明：控制是否对该密钥启用速率限制
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool")]
     pub rate_limit_enabled: Option<bool>,
     // 用途：每分钟最大请求数
     // 说明：限流配置，每分钟允许的最大请求数
@@ -53,6 +77,7 @@ pub struct ApiKey {
     pub ip_blacklist: Option<serde_json::Value>,
     // 用途：是否启用
     // 说明：控制密钥是否可用，true表示启用，false表示禁用
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool")]
     pub enabled: Option<bool>,
     // 用途：状态
     // 说明：密钥状态，如"active"、"revoked"、"expired"

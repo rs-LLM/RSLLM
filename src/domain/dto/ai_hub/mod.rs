@@ -55,6 +55,14 @@ pub use price_rule::*;
 pub mod analytics;
 pub use analytics::*;
 
+// 用途：导出计费标准相关DTO
+pub mod pricing;
+pub use pricing::*;
+
+// 用途：导出交易相关DTO
+pub mod transaction;
+pub use transaction::*;
+
 // 用途：导出输入验证相关DTO
 // 说明：包含统一的输入参数验证功能
 pub mod validation;

@@ -14,19 +14,36 @@ use uuid::Uuid;
 // 导入相关类型
 use crate::context::ServiceContext;
 use crate::domain::dto::chat::ChatCompletionRequest;
-use crate::domain::vo::RespVO;
+use crate::domain::vo::response::ApiResponse;
+use crate::domain::vo::chat::ChatCompletion;
 use crate::service::{TokenCounter, Content, TokenCountMeta};
 use crate::domain::dto::content::{ChatMessageContent, ChatMessageContentPart, ChatCompletionMessage};
-use crate::domain::vo::chat::{ChatCompletion, ChatCompletionChoice};
+use crate::domain::vo::chat::{ChatCompletionChoice};
 use crate::domain::vo::usage::Usage;
 use crate::service::BillingService;
 use crate::service::PriceRuleService;
 use crate::service::CalculatedFee;
 use crate::domain::dto::validation::Validator;
+use crate::service::ai_hub::model_definition_service::ModelDefinitionService;
 
 /// 聊天补全接口
 ///
 /// 提供OpenAI兼容的聊天补全功能，支持流式和非流式响应
+#[utoipa::path(
+    post,
+    path = "/api/v1/chat/completions",
+    request_body = ChatCompletionRequest,
+    responses(
+        (status = 200, description = "聊天补全成功", body = ApiResponse<ChatCompletion>),
+        (status = 400, description = "参数错误", body = ApiResponse<ChatCompletion>),
+        (status = 401, description = "未授权", body = ApiResponse<ChatCompletion>),
+        (status = 500, description = "服务器错误", body = ApiResponse<ChatCompletion>)
+    ),
+    tag = "chat",
+    security(
+        ("api_key" = [])
+    )
+)]
 #[axum::debug_handler]
 pub async fn chat_completions(
     headers: HeaderMap,
@@ -41,7 +58,7 @@ pub async fn chat_completions(
     // 1. 用户认证
     let user_id = match authenticate_user(&headers, &state) {
         Ok(id) => id,
-        Err(e) => return RespVO::from_error(e.to_string()),
+        Err(e) => return Json(ApiResponse::error("401", &e)),
     };
     log::info!("[AI Hub] User authenticated: {}", user_id);
     
@@ -59,14 +76,14 @@ pub async fn chat_completions(
         Ok(_) => log::info!("[AI Hub] Input validation passed"),
         Err(e) => {
             log::warn!("[AI Hub] Input validation failed: {}", e);
-            return RespVO::from_error(format!("输入验证失败: {}", e));
+            return Json(ApiResponse::error("400", &format!("输入验证失败: {}", e)));
         }
     }
     
     // 3. Token计算
     let token_meta = match calculate_tokens(&req) {
         Ok(meta) => meta,
-        Err(e) => return RespVO::from_error(e.to_string()),
+        Err(e) => return Json(ApiResponse::error("500", &e)),
     };
     log::info!("[AI Hub] Token calculation: input={}, model={}",
         token_meta.input_tokens, req.model);
@@ -88,7 +105,7 @@ pub async fn chat_completions(
         price_rule_service,
     ).await {
         Ok(fee) => fee,
-        Err(e) => return RespVO::from_error(e.to_string()),
+        Err(e) => return Json(ApiResponse::error("500", &e)),
     };
     
     log::info!("[AI Hub] Pre-consumption check passed: cost={:.2}", fee.total_cost);
@@ -102,7 +119,7 @@ pub async fn chat_completions(
             if let Err(rollback_err) = billing_service.rollback_pre_consumption(&fee).await {
                 log::error!("[AI Hub] Failed to rollback pre-consumption: {}", rollback_err);
             }
-            return RespVO::from_error(format!("AI service call failed: {}", e));
+            return Json(ApiResponse::error("500", &format!("AI service call failed: {}", e)));
         }
     };
     
@@ -125,14 +142,14 @@ pub async fn chat_completions(
             if let Err(rollback_err) = billing_service.rollback_pre_consumption(&fee).await {
                 log::error!("[AI Hub] Failed to rollback pre-consumption: {}", rollback_err);
             }
-            return RespVO::from_error(format!("Failed to deduct quota and log: {}", e));
+            return Json(ApiResponse::error("500", &format!("Failed to deduct quota and log: {}", e)));
         }
     };
     
     log::info!("[AI Hub] Usage logged: {}", usage_log_id);
     
     // 7. 返回响应
-    RespVO::from(response)
+    Json(ApiResponse::success(response))
 }
 
 /// 用户认证
@@ -230,25 +247,34 @@ async fn call_provider(
     req: &ChatCompletionRequest,
     _user_id: &str,
 ) -> std::result::Result<ChatCompletion, String> {
-    // 从ProviderRegistry获取Provider
+    // 1. 根据模型key获取模型定义
+    let model_service = state.model_definition_service.read().await;
+    let model_service = model_service.as_ref()
+        .ok_or_else(|| "Model definition service not initialized".to_string())?;
+    
+    let model_definition = model_service
+        .get_model_by_key(&req.model)
+        .await
+        .map_err(|e| format!("Failed to get model definition: {}", e))?;
+    
+    // 2. 从ProviderRegistry获取Provider
     let provider_registry = state.provider_registry.read().await;
     
-    // 根据模型名称查找对应的Provider
-    // 这里简化处理，实际应该根据模型配置映射到具体的provider_id
-    let provider_id = &req.model; // 假设model就是provider_id
+    // 使用模型定义中的provider_id
+    let provider_id = &model_definition.provider_id;
     
     let provider = provider_registry.get_provider(provider_id)
-        .ok_or_else(|| format!("Provider not found for model: {}", req.model))?;
+        .ok_or_else(|| format!("Provider not found for provider_id: {}", provider_id))?;
     
-    // 转换请求类型
+    // 3. 转换请求类型
     let provider_req = convert_to_provider_request(req);
     
-    // 调用Provider的chat_completions方法
+    // 4. 调用Provider的chat_completions方法
     let response = provider.chat_completions(provider_req, &serde_json::json!({}))
         .await
         .map_err(|e| format!("Provider error: {}", e))?;
     
-    // 转换响应类型
+    // 5. 转换响应类型
     convert_from_provider_response(response)
 }
 

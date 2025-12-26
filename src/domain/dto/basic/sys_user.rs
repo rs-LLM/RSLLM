@@ -19,10 +19,13 @@ use rbatis::rbdc::DateTime;
 // 用途：导入serde的序列化和反序列化特性
 // 说明：支持JSON序列化和反序列化，方便在网络中传输数据
 use serde::{Deserialize, Serialize};
+// 用途：导入OpenAPI Schema支持
+// 说明：用于自动生成API文档
+use utoipa::ToSchema;
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：用户添加DTO结构体
 // 说明：封装添加用户所需的参数
 pub struct UserAddDTO {
@@ -37,6 +40,7 @@ pub struct UserAddDTO {
     pub name: Option<String>,
     // 用途：登录检查状态
     // 说明：用于控制用户登录行为
+    #[schema(value_type = Option<String>)]
     pub login_check: Option<LoginCheck>,
     // 用途：角色ID
     // 说明：用于关联用户和角色
@@ -44,6 +48,9 @@ pub struct UserAddDTO {
     // 用途：用户状态
     // 说明：用于控制用户是否可以登录（启用/禁用）
     pub state: Option<i32>,
+    // 用途：用户余额
+    // 说明：用于设置用户的初始余额，默认为0
+    pub balance: Option<f64>,
 }
 
 // 用途：实现UserAddDTO到SysUser的转换
@@ -59,14 +66,15 @@ impl From<UserAddDTO> for SysUser {
             name: arg.name.clone(),
             login_check: arg.login_check.clone(),
             state: Some(arg.state.unwrap_or(1)),
+            balance: arg.balance,
             create_date: DateTime::now().into(),
         }
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：用户编辑DTO结构体
 // 说明：封装编辑用户所需的参数
 pub struct UserEditDTO {
@@ -87,10 +95,14 @@ pub struct UserEditDTO {
     pub state: Option<i32>,
     // 用途：登录检查状态
     // 说明：用于修改用户登录检查状态
+    #[schema(value_type = Option<String>)]
     pub login_check: Option<LoginCheck>,
     // 用途：角色ID
     // 说明：用于修改用户关联的角色
     pub role_id: Option<String>,
+    // 用途：用户余额
+    // 说明：用于修改用户余额
+    pub balance: Option<f64>,
 }
 
 // 用途：实现UserEditDTO到SysUser的转换
@@ -107,6 +119,7 @@ impl From<UserEditDTO> for SysUser {
             login_check: arg.login_check,
             state: arg.state,
             create_date: None,
+            balance: arg.balance,
         }
     }
 }
@@ -156,9 +169,9 @@ impl From<&UserRolePageDTO> for UserPageDTO {
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：用户角色分页查询DTO结构体
 // 说明：封装用户角色分页查询所需的参数
 pub struct UserRolePageDTO {

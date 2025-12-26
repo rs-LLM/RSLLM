@@ -14,7 +14,7 @@ use uuid::Uuid;
 // 导入相关类型
 use crate::context::ServiceContext;
 use crate::domain::dto::embeddings::EmbeddingsRequest;
-use crate::domain::vo::RespVO;
+use crate::domain::vo::response::ApiResponse;
 use crate::service::{TokenCounter, Content};
 use crate::domain::vo::embeddings::{EmbeddingsResponse, Embeddings, Embedding};
 use crate::domain::vo::usage::EmbeddingUsage;
@@ -23,6 +23,21 @@ use crate::domain::dto::validation::Validator;
 /// 嵌入生成接口
 ///
 /// 提供OpenAI兼容的嵌入生成功能
+#[utoipa::path(
+    post,
+    path = "/api/v1/embeddings",
+    request_body = EmbeddingsRequest,
+    responses(
+        (status = 200, description = "嵌入生成成功", body = ApiResponse<EmbeddingsResponse>),
+        (status = 400, description = "参数错误", body = ApiResponse<EmbeddingsResponse>),
+        (status = 401, description = "未授权", body = ApiResponse<EmbeddingsResponse>),
+        (status = 500, description = "服务器错误", body = ApiResponse<EmbeddingsResponse>)
+    ),
+    tag = "embeddings",
+    security(
+        ("api_key" = [])
+    )
+)]
 #[axum::debug_handler]
 pub async fn embeddings(
     headers: HeaderMap,
@@ -37,7 +52,7 @@ pub async fn embeddings(
     // 1. 用户认证
     let user_id = match authenticate_user(&headers, &state) {
         Ok(id) => id,
-        Err(e) => return RespVO::from_error(e.to_string()),
+        Err(e) => return Json(ApiResponse::error("401", &e.to_string())),
     };
     log::info!("[AI Hub] User authenticated: {}", user_id);
     
@@ -46,14 +61,14 @@ pub async fn embeddings(
         Ok(_) => log::info!("[AI Hub] Input validation passed"),
         Err(e) => {
             log::warn!("[AI Hub] Input validation failed: {}", e);
-            return RespVO::from_error(format!("输入验证失败: {}", e));
+            return Json(ApiResponse::error("400", &format!("输入验证失败: {}", e)));
         }
     }
     
     // 3. Token计算
     let (input_tokens, input_text_count) = match calculate_tokens(&req) {
         Ok(result) => result,
-        Err(e) => return RespVO::from_error(e.to_string()),
+        Err(e) => return Json(ApiResponse::error("500", &e.to_string())),
     };
     log::info!("[AI Hub] Token calculation: input={}, model={}",
         input_tokens, req.model);
@@ -74,7 +89,7 @@ pub async fn embeddings(
         "embeddings",
     ).await {
         Ok(fee) => fee,
-        Err(e) => return RespVO::from_error(e.to_string()),
+        Err(e) => return Json(ApiResponse::error("400", &e.to_string())),
     };
     
     log::info!("[AI Hub] Pre-consumption check passed: cost={:.2}", fee.total_cost);
@@ -95,13 +110,13 @@ pub async fn embeddings(
         })),
     ).await {
         Ok(id) => id,
-        Err(e) => return RespVO::from_error(format!("Failed to deduct quota and log: {}", e)),
+        Err(e) => return Json(ApiResponse::error("500", &format!("Failed to deduct quota and log: {}", e))),
     };
     
     log::info!("[AI Hub] Usage logged: {}", usage_log_id);
     
     // 7. 返回响应
-    RespVO::from(response)
+    Json(ApiResponse::success(response))
 }
 
 /// 用户认证

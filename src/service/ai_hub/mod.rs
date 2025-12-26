@@ -36,11 +36,23 @@ pub mod provider_factory;
 
 // 用途：声明模型定义服务模块
 // 原因：管理AI模型的定义、配置和生命周期
-mod model_definition_service;
+pub mod model_definition_service;
 
 // 用途：声明供应商配置服务模块
 // 原因：管理AI服务供应商的配置和生命周期
 mod provider_config_service;
+
+// 用途：声明计费标准服务模块
+// 原因：处理AI模型计费标准相关业务逻辑
+mod pricing_service;
+
+// 用途：声明交易服务模块
+// 原因：处理用户余额交易记录相关业务逻辑
+pub mod transaction_service;
+
+// 用途：声明余额服务模块
+// 原因：处理用户余额管理相关业务逻辑
+pub mod balance_service;
 
 // 用途：导出价格规则服务
 // 原因：允许其他模块访问价格规则功能
@@ -79,6 +91,18 @@ pub use model_definition_service::*;
 // 原因：允许其他模块访问供应商管理功能
 pub use provider_config_service::*;
 
+// 用途：导出计费标准服务
+// 原因：允许其他模块访问计费标准功能
+pub use pricing_service::*;
+
+// 用途：导出交易服务
+// 原因：允许其他模块访问交易功能
+pub use transaction_service::*;
+
+// 用途：导出余额服务
+// 原因：允许其他模块访问余额功能
+pub use balance_service::*;
+
 // 用途：导出Provider相关类型
 // 原因：供外部模块使用
 pub use provider_trait::{
@@ -106,6 +130,8 @@ pub use crate::domain::dto::ai_hub::user_quota::*;
 pub use crate::domain::dto::ai_hub::billing::*;
 pub use crate::domain::dto::ai_hub::price_rule::*;
 pub use crate::domain::dto::ai_hub::analytics::*;
+pub use crate::domain::dto::ai_hub::pricing::*;
+pub use crate::domain::dto::ai_hub::transaction::*;
 
 // 用途：导出VO类型
 // 原因：供控制器使用

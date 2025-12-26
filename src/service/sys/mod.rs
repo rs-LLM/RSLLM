@@ -7,6 +7,10 @@ mod sys_auth_service;
 // 原因：处理字典相关业务逻辑，如字典的增删改查
 mod sys_dict_service;
 
+// 用途：声明系统组织服务模块
+// 原因：处理组织相关业务逻辑，如组织的增删改查和树形结构构建
+mod sys_organization_service;
+
 // 用途：声明系统短信服务模块
 // 原因：处理短信发送相关业务逻辑
 mod sys_sms_service;
@@ -26,6 +30,10 @@ pub use sys_auth_service::*;
 // 用途：导出系统字典服务
 // 原因：允许其他模块访问字典功能
 pub use sys_dict_service::*;
+
+// 用途：导出系统组织服务
+// 原因：允许其他模块访问组织功能
+pub use sys_organization_service::*;
 
 // 用途：导出系统短信服务
 // 原因：允许其他模块访问短信发送功能

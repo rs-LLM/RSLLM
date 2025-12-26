@@ -1,12 +1,24 @@
 //! 配额管理服务模块
 //! 提供用户配额的分配、扣减、充值和查询功能
 use crate::domain::table::ai_hub::user_quota::AiHubUserQuota;
+use crate::domain::table::basic::SysUser;
 use crate::domain::dto::user_quota::{CreateQuotaDTO, UpdateQuotaDTO, RechargeQuotaDTO, DeductQuotaDTO, QuotaQueryDTO, AllocateQuotaDTO};
 use crate::domain::vo::user_quota::{AiHubUserQuotaVO, QuotaOverviewVO, QuotaWarningVO};
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::pool;
 use rbatis::rbdc::DateTime;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use std::str::FromStr;
+
+/// 配额列表响应结构体
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ListQuotasResponse {
+    pub items: Vec<AiHubUserQuotaVO>,
+    pub total: i64,
+    pub page: i64,
+    pub size: i64,
+}
 
 /// 配额管理服务
 ///
@@ -182,7 +194,29 @@ impl QuotaService {
             });
         }
 
-        // 检查余额是否充足
+        // 检查用户余额是否充足
+        let users = SysUser::select_by_map(&mut tx, rbs::value! { "id": &quota.user_id }).await?;
+        if users.is_empty() {
+            tx.rollback().await?;
+            return Err(ApplicationError::NotFound {
+                message: "User not found".to_string(),
+                resource: Some("user".to_string()),
+                id: Some(quota.user_id.clone()),
+            });
+        }
+        
+        let user_balance = users[0].balance.unwrap_or(0.0);
+        if user_balance < dto.amount {
+            tx.rollback().await?;
+            return Err(ApplicationError::BalanceExceeded {
+                message: format!("Insufficient balance: required {}, remaining {}", dto.amount, user_balance),
+                user_id: Some(quota.user_id),
+                required: Some(dto.amount),
+                remaining: Some(user_balance),
+            });
+        }
+
+        // 检查配额是否充足
         if quota.remaining_quota < dto.amount {
             tx.rollback().await?;
             return Err(ApplicationError::QuotaExceeded {
@@ -309,7 +343,7 @@ impl QuotaService {
     }
 
     /// 查询用户配额列表
-    pub async fn list_quotas(&self, query: QuotaQueryDTO) -> ApplicationResult<Vec<AiHubUserQuotaVO>> {
+    pub async fn list_quotas(&self, query: QuotaQueryDTO) -> ApplicationResult<ListQuotasResponse> {
         // 构建查询条件
         let mut map = rbs::value! {};
 
@@ -335,16 +369,22 @@ impl QuotaService {
         // 手动排序
         quotas.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-        // 手动分页
-        if let Some(page) = query.page {
-            if let Some(page_size) = query.page_size {
-                let offset = ((page - 1) * page_size) as usize;
-                let end = offset + page_size as usize;
-                quotas = quotas.into_iter().skip(offset).take(end - offset).collect();
-            }
-        }
+        // 计算总数
+        let total = quotas.len() as i64;
 
-        Ok(quotas.into_iter().map(|q| self.to_vo(q)).collect())
+        // 手动分页
+        let page = query.page.unwrap_or(1);
+        let page_size = query.page_size.unwrap_or(10);
+        let offset = ((page - 1) * page_size) as usize;
+        let end = offset + page_size as usize;
+        quotas = quotas.into_iter().skip(offset).take(end - offset).collect();
+
+        Ok(ListQuotasResponse {
+            items: quotas.into_iter().map(|q| self.to_vo(q)).collect(),
+            total,
+            page,
+            size: page_size,
+        })
     }
 
     /// 查询配额概览
@@ -427,7 +467,7 @@ impl QuotaService {
             pool!(),
             rbs::value! {
                 "user_id": &dto.user_id,
-                "quota_type": &dto.quota_type,
+                "quota_period": &dto.quota_type,
                 "status": "active"
             }
         ).await?;

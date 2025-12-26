@@ -6,7 +6,7 @@
 use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, Deserializer};
 // 用途：导入JSON序列化支持
 // 说明：用于配置详情和认证配置的JSON存储
 use serde_json;
@@ -14,12 +14,36 @@ use serde_json;
 // 说明：用于自动生成增删改查操作
 use rbatis::crud;
 
+// 用途：自定义反序列化函数，支持从整数或布尔值反序列化为布尔类型
+// 说明：兼容数据库中存储的整数1/0和布尔值true/false
+fn deserialize_bool_from_int_or_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // 使用serde_json::Value作为中间层
+    let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+    
+    match value {
+        serde_json::Value::Bool(b) => Ok(Some(b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Some(i != 0))
+            } else {
+                Ok(None)
+            }
+        }
+        serde_json::Value::Null => Ok(None),
+        _ => Ok(None),
+    }
+}
+
 // 用途：供应商配置表结构体（扩展版）
 // 说明：存储AI服务供应商的完整配置信息，支持认证和限流
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct ProviderConfig {
     // 用途：供应商ID
     // 说明：服务供应商的唯一标识符
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     // 用途：供应商名称
     // 说明：服务供应商的显示名称，如"OpenAI"、"Anthropic"等
@@ -32,51 +56,67 @@ pub struct ProviderConfig {
     pub api_base: String,
     // 用途：默认API密钥（加密）
     // 说明：供应商的默认API密钥，存储为加密格式
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_encrypted: Option<String>,
     // 用途：认证类型
     // 说明：认证方式，如"api_key"、"oauth2"、"header"等
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_type: Option<String>,
     // 用途：认证配置
     // 说明：额外的认证相关配置，JSON格式存储
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_config: Option<serde_json::Value>,
     // 用途：默认输入价格（每1K tokens）
     // 说明：供应商的默认输入定价，单位为货币单位
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_input_price: Option<f64>,
     // 用途：默认输出价格（每1K tokens）
     // 说明：供应商的默认输出定价，单位为货币单位
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_output_price: Option<f64>,
     // 用途：是否启用限流
     // 说明：控制是否对供应商启用速率限制
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool", skip_serializing_if = "Option::is_none")]
     pub rate_limit_enabled: Option<bool>,
     // 用途：最大并发请求数
     // 说明：限制同时向供应商发送的最大请求数量
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_concurrent_requests: Option<i32>,
     // 用途：是否启用熔断器
     // 说明：控制是否启用熔断器机制
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool", skip_serializing_if = "Option::is_none")]
     pub circuit_breaker_enabled: Option<bool>,
     // 用途：失败阈值
     // 说明：触发熔断器的连续失败次数
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_threshold: Option<i32>,
     // 用途：超时时间（秒）
     // 说明：请求供应商的超时时间设置
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<i32>,
     // 用途：是否启用
     // 说明：控制供应商是否可用，true表示启用，false表示禁用
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool", skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
     // 用途：状态
     // 说明：供应商状态，如"active"、"maintenance"、"deprecated"
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     // 用途：供应商描述
     // 说明：供应商的详细描述信息
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     // 用途：文档链接
     // 说明：供应商的官方文档链接
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation_url: Option<String>,
     // 用途：创建时间
     // 说明：记录的创建时间
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime>,
     // 用途：更新时间
     // 说明：记录的最后更新时间
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<DateTime>,
 }
 

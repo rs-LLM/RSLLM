@@ -8,31 +8,32 @@ use crate::context::CONTEXT;
 // 用途：导入系统用户表结构
 // 说明：用于从SysUser转换为SignInVO
 use crate::domain::table::sys_user::SysUser;
-// 用途：导入系统角色视图对象
-// 说明：用于在登录响应中返回用户的角色信息
-use crate::domain::vo::rbac::SysRoleVO;
 // 用途：导入serde的序列化和反序列化特性
 // 说明：支持SignInVO的JSON序列化和反序列化，便于在网络中传输
 use serde::{Deserialize, Serialize};
+// 用途：导入OpenAPI Schema支持
+// 说明：用于自动生成API文档
+use utoipa::ToSchema;
 
 // 用途：登录响应视图对象
 // 说明：用于返回给客户端的登录结果，包含用户信息、权限和令牌
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct SignInVO {
     // 用途：用户ID
-    // 说明：标识登录用户的唯一ID
+    // 说明：标识登录用户的唯一ID，对应前端的userId
+    #[serde(rename = "userId")]
     pub id: Option<String>,
     // 用途：用户账号
-    // 说明：用户的登录账号
+    // 说明：用户的登录账号，对应前端的username
+    #[serde(rename = "username")]
     pub account: Option<String>,
-    // 用途：用户密码
-    // 说明：用户密码（通常在登录响应中会被过滤，不返回给客户端）
-    pub password: Option<String>,
     // 用途：用户姓名
-    // 说明：用户的显示名称
+    // 说明：用户的显示名称，对应前端的realName
+    #[serde(rename = "realName")]
     pub name: Option<String>,
     // 用途：登录检查方式
     // 说明：定义用户登录时需要的验证方式
+    #[schema(value_type = Option<String>)]
     pub login_check: Option<LoginCheck>,
     // 用途：用户状态
     // 说明：控制用户是否可用，1表示启用，0表示禁用
@@ -44,11 +45,25 @@ pub struct SignInVO {
     // 说明：用户拥有的权限标识列表
     pub permissions: Vec<String>,
     // 用途：访问令牌
-    // 说明：用于后续请求的身份验证
+    // 说明：用于后续请求的身份验证，对应前端的token
+    #[serde(rename = "token")]
     pub access_token: String,
     // 用途：用户角色列表
-    // 说明：用户拥有的角色信息列表
-    pub roles: Vec<SysRoleVO>,
+    // 说明：用户拥有的角色名称列表，对应Vben前端的roles字段
+    pub roles: Vec<String>,
+    // 用途：用户头像
+    // 说明：用户的头像URL，对应前端的avatar
+    #[serde(default)]
+    pub avatar: Option<String>,
+    // 用途：用户描述
+    // 说明：用户的描述信息
+    #[serde(default)]
+    pub desc: Option<String>,
+    // 用途：首页地址
+    // 说明：用户的默认首页路径，对应前端的homePath
+    #[serde(rename = "homePath")]
+    #[serde(default)]
+    pub home_path: Option<String>,
 }
 
 // 用途：实现SysUser到SignInVO的转换
@@ -60,7 +75,6 @@ impl From<SysUser> for SignInVO {
         Self {
             id: value.id,
             account: value.account,
-            password: value.password,
             name: value.name,
             login_check: value.login_check,
             state: value.state,
@@ -70,6 +84,9 @@ impl From<SysUser> for SignInVO {
             permissions: vec![],
             access_token: "".to_string(),
             roles: vec![],
+            avatar: Some("https://api.dicebear.com/7.x/avataaars/svg?seed=admin".to_string()),
+            desc: Some("RSLLM系统管理员".to_string()),
+            home_path: Some("/rsllm/home".to_string()),
         }
     }
 }

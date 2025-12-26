@@ -7,12 +7,14 @@ use crate::config::config::ApplicationConfig;
 use crate::service::{
     CacheService,                    // 缓存服务
     RbacPermissionService,           // 权限服务
+    RbacPermissionAuditLogService,   // 权限审计日志服务
     RbacRolePermissionService,       // 角色权限关联服务
     RbacRoleService,                 // 角色服务
     RbacUserRoleService,             // 用户角色关联服务
     StorageService,                  // 存储服务
     SysAuthService,                  // 系统认证服务
     SysDictService,                  // 系统字典服务
+    SysOrganizationService,          // 系统组织服务
     SysTrashService,                 // 系统回收站服务
     SysUserService,                  // 系统用户服务
     // AI Hub 服务
@@ -77,6 +79,8 @@ pub struct ServiceContext {
                                                     // 说明：处理用户相关的业务逻辑
     pub rbac_permission_service: RbacPermissionService, // 用途：权限服务
                                                       // 说明：处理权限相关的业务逻辑
+    pub rbac_permission_audit_log_service: RbacPermissionAuditLogService, // 用途：权限审计日志服务
+                                                                          // 说明：处理权限审计日志相关业务逻辑
     pub rbac_role_service: RbacRoleService,          // 用途：角色服务
                                                     // 说明：处理角色相关的业务逻辑
     pub rbac_role_permission_service: RbacRolePermissionService, // 用途：角色权限关联服务
@@ -85,6 +89,8 @@ pub struct ServiceContext {
                                                     // 说明：处理用户和角色的关联关系
     pub sys_dict_service: SysDictService,            // 用途：系统字典服务
                                                     // 说明：处理字典数据的业务逻辑
+    pub sys_organization_service: SysOrganizationService, // 用途：系统组织服务
+                                                            // 说明：处理组织数据的业务逻辑
     pub sys_auth_service: SysAuthService,            // 用途：系统认证服务
                                                     // 说明：处理认证相关的业务逻辑
     pub sys_trash_service: SysTrashService,          // 用途：系统回收站服务
@@ -123,10 +129,12 @@ impl Clone for ServiceContext {
             storage_service: self.storage_service.clone(),
             sys_user_service: self.sys_user_service.clone(),
             rbac_permission_service: self.rbac_permission_service.clone(),
+            rbac_permission_audit_log_service: self.rbac_permission_audit_log_service.clone(),
             rbac_role_service: self.rbac_role_service.clone(),
             rbac_role_permission_service: self.rbac_role_permission_service.clone(),
             rbac_user_role_service: self.rbac_user_role_service.clone(),
             sys_dict_service: self.sys_dict_service.clone(),
+            sys_organization_service: self.sys_organization_service.clone(),
             sys_auth_service: self.sys_auth_service.clone(),
             sys_trash_service: self.sys_trash_service.clone(),
             price_rule_service: self.price_rule_service.clone(),
@@ -230,9 +238,8 @@ impl ServiceContext {
     pub async fn init_ai_hub_services(&self) {
         log::info!("[rsllm] init AI Hub management services...");
         
-        // 创建加密服务 - 从环境变量获取加密密钥
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .expect("ENCRYPTION_KEY environment variable must be set");
+        // 创建加密服务 - 从环境变量获取加密密钥，如果未设置则使用默认密钥
+        let encryption_key = std::env::var("ENCRYPTION_KEY").unwrap_or_else(|_| "rsllm_encryption_key_default_key".to_string());
         let encryption_service = EncryptionService::new(encryption_key.as_bytes())
             .expect("Failed to create encryption service");
         
@@ -286,6 +293,10 @@ impl Default for ServiceContext {
             // 说明：创建权限服务实例，用于处理权限相关业务
             rbac_permission_service: RbacPermissionService {},
             
+            // 用途：初始化权限审计日志服务
+            // 说明：创建权限审计日志服务实例，用于处理权限审计日志相关业务
+            rbac_permission_audit_log_service: RbacPermissionAuditLogService {},
+            
             // 用途：初始化角色权限关联服务
             // 说明：创建角色权限关联服务实例，用于处理角色和权限的关联关系
             rbac_role_permission_service: RbacRolePermissionService {},
@@ -297,6 +308,10 @@ impl Default for ServiceContext {
             // 用途：初始化系统字典服务
             // 说明：创建字典服务实例，用于处理字典数据业务
             sys_dict_service: SysDictService {},
+            
+            // 用途：初始化系统组织服务
+            // 说明：创建组织服务实例，用于处理组织数据业务
+            sys_organization_service: SysOrganizationService {},
             
             // 用途：初始化系统认证服务
             // 说明：创建认证服务实例，用于处理认证相关业务

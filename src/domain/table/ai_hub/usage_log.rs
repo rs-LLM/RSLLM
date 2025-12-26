@@ -70,8 +70,8 @@ pub struct AiHubUsageLog {
     // 说明：如果请求失败，记录错误信息
     pub error_message: Option<String>,
     // 用途：是否已扣减配额
-    // 说明：标记是否已经扣减用户配额
-    pub quota_deducted: Option<bool>,
+    // 说明：标记是否已经扣减用户配额（0=未扣减，1=已扣减）
+    pub quota_deducted: Option<i32>,
     // 用途：配额快照
     // 说明：扣减配额时的配额状态快照，JSON格式
     pub quota_snapshot: Option<serde_json::Value>,

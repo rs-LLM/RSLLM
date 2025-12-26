@@ -1,5 +1,8 @@
-mod basic;
+pub mod basic;
 pub use basic::*;
+
+// 导出rbac模块，用于直接访问RBAC相关表结构
+pub use basic::rbac;
 
 // 保留ai_hub模块的同步函数，但不导出其所有内容以避免名称冲突
 pub mod ai_hub;

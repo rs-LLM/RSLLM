@@ -9,6 +9,7 @@ use axum::{
 
 use crate::error::Result;
 use crate::service::ai_hub::{UserUsageStatsQueryDTO, SystemStatsQueryDTO, PerformanceTrendsQueryDTO, UserUsageStatsVO, SystemStatsVO, PerformanceTrendsVO, ModelStatsVO, DailyStatsVO, UserStatsVO, HourlyTrendVO, AnalyticsService};
+use crate::domain::vo::response::ApiResponse;
 
 use axum::debug_handler;
 
@@ -24,10 +25,10 @@ use axum::debug_handler;
         ("end_time" = String, Query, description = "结束时间")
     ),
     responses(
-        (status = 200, description = "查询成功", body = UserUsageStatsVO),
-        (status = 400, description = "参数错误"),
-        (status = 401, description = "未授权"),
-        (status = 500, description = "服务器错误")
+        (status = 200, description = "查询成功", body = ApiResponse<UserUsageStatsVO>),
+        (status = 400, description = "参数错误", body = ApiResponse<UserUsageStatsVO>),
+        (status = 401, description = "未授权", body = ApiResponse<UserUsageStatsVO>),
+        (status = 500, description = "服务器错误", body = ApiResponse<UserUsageStatsVO>)
     ),
     security(
         ("api_key" = [])
@@ -37,7 +38,7 @@ use axum::debug_handler;
 pub async fn get_user_usage_stats(
     headers: HeaderMap,
     Query(params): Query<UserUsageStatsQueryDTO>,
-) -> Result<Json<UserUsageStatsVO>> {
+) -> Result<Json<ApiResponse<UserUsageStatsVO>>> {
     // 从请求头获取用户信息
     let user_id = headers
         .get("x-user-id")
@@ -51,19 +52,19 @@ pub async fn get_user_usage_stats(
         .unwrap_or("user");
     
     let query_user_id = if role == "admin" {
-        &params.user_id
+        params.user_id.clone().unwrap_or_else(|| user_id.to_string())
     } else {
-        user_id
+        user_id.to_string()
     };
     
     // 创建AnalyticsService实例
     let analytics_service = AnalyticsService {};
     
     let stats = analytics_service
-        .get_user_usage_stats(query_user_id, params.start_time, params.end_time, params.model_id)
+        .get_user_usage_stats(&query_user_id, params.start_time, params.end_time, params.model_id)
         .await?;
     
-    Ok(Json(UserUsageStatsVO {
+    Ok(Json(ApiResponse::success(UserUsageStatsVO {
         user_id: stats.user_id,
         total_requests: stats.total_requests,
         total_input_tokens: stats.total_input_tokens,
@@ -85,7 +86,7 @@ pub async fn get_user_usage_stats(
             output_tokens: d.output_tokens,
             cost: d.cost,
         }).collect(),
-    }))
+    })))
 }
 
 /// 查询系统统计
@@ -99,10 +100,10 @@ pub async fn get_user_usage_stats(
         ("end_time" = String, Query, description = "结束时间")
     ),
     responses(
-        (status = 200, description = "查询成功", body = SystemStatsVO),
-        (status = 400, description = "参数错误"),
-        (status = 401, description = "未授权"),
-        (status = 500, description = "服务器错误")
+        (status = 200, description = "查询成功", body = ApiResponse<SystemStatsVO>),
+        (status = 400, description = "参数错误", body = ApiResponse<SystemStatsVO>),
+        (status = 401, description = "未授权", body = ApiResponse<SystemStatsVO>),
+        (status = 500, description = "服务器错误", body = ApiResponse<SystemStatsVO>)
     ),
     security(
         ("api_key" = [])
@@ -111,7 +112,7 @@ pub async fn get_user_usage_stats(
 #[debug_handler]
 pub async fn get_system_stats(
     Query(params): Query<SystemStatsQueryDTO>,
-) -> Result<Json<SystemStatsVO>> {
+) -> Result<Json<ApiResponse<SystemStatsVO>>> {
     // 创建AnalyticsService实例
     let analytics_service = AnalyticsService {};
     
@@ -119,7 +120,7 @@ pub async fn get_system_stats(
         .get_system_stats(params.start_time, params.end_time)
         .await?;
     
-    Ok(Json(SystemStatsVO {
+    Ok(Json(ApiResponse::success(SystemStatsVO {
         total_requests: stats.total_requests,
         total_tokens: stats.total_tokens,
         total_revenue: stats.total_revenue,
@@ -137,7 +138,7 @@ pub async fn get_system_stats(
             output_tokens: m.output_tokens,
             cost: m.cost,
         }).collect(),
-    }))
+    })))
 }
 
 /// 查询性能趋势
@@ -150,10 +151,10 @@ pub async fn get_system_stats(
         ("days" = i64, Query, description = "天数")
     ),
     responses(
-        (status = 200, description = "查询成功", body = PerformanceTrendsVO),
-        (status = 400, description = "参数错误"),
-        (status = 401, description = "未授权"),
-        (status = 500, description = "服务器错误")
+        (status = 200, description = "查询成功", body = ApiResponse<PerformanceTrendsVO>),
+        (status = 400, description = "参数错误", body = ApiResponse<PerformanceTrendsVO>),
+        (status = 401, description = "未授权", body = ApiResponse<PerformanceTrendsVO>),
+        (status = 500, description = "服务器错误", body = ApiResponse<PerformanceTrendsVO>)
     ),
     security(
         ("api_key" = [])
@@ -162,7 +163,7 @@ pub async fn get_system_stats(
 #[debug_handler]
 pub async fn get_performance_trends(
     Query(params): Query<PerformanceTrendsQueryDTO>,
-) -> Result<Json<PerformanceTrendsVO>> {
+) -> Result<Json<ApiResponse<PerformanceTrendsVO>>> {
     // 创建AnalyticsService实例
     let analytics_service = AnalyticsService {};
     
@@ -171,7 +172,7 @@ pub async fn get_performance_trends(
         .get_performance_trends(days)
         .await?;
     
-    Ok(Json(PerformanceTrendsVO {
+    Ok(Json(ApiResponse::success(PerformanceTrendsVO {
         success_rate: trends.success_rate,
         avg_response_time: trends.avg_response_time,
         hourly_trends: trends.hourly_trends.into_iter().map(|h| HourlyTrendVO {
@@ -180,5 +181,5 @@ pub async fn get_performance_trends(
             avg_response_time: h.avg_response_time,
             error_rate: h.error_rate,
         }).collect(),
-    }))
+    })))
 }

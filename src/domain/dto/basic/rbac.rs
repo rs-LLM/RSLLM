@@ -13,10 +13,13 @@ use rbatis::rbdc::DateTime;
 // 用途：导入serde的序列化和反序列化特性
 // 说明：支持JSON序列化和反序列化，方便在网络中传输数据
 use serde::{Deserialize, Serialize};
+// 用途：导入utoipa的ToSchema特性
+// 说明：支持OpenAPI文档生成
+use utoipa::ToSchema;
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：权限分页查询DTO结构体
 // 说明：封装权限分页查询所需的参数
 pub struct PermissionPageDTO {
@@ -41,9 +44,9 @@ impl From<&PermissionPageDTO> for PageRequest {
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：权限添加DTO结构体
 // 说明：封装添加权限所需的参数
 pub struct PermissionAddDTO {
@@ -59,6 +62,21 @@ pub struct PermissionAddDTO {
     // 用途：权限路径
     // 说明：用于API路径与权限的映射
     pub path: Option<String>,
+    // 用途：权限类型
+    // 说明：区分权限类型（menu/button/api）
+    pub permission_type: Option<String>,
+    // 用途：权限描述
+    // 说明：权限的详细描述
+    pub description: Option<String>,
+    // 用途：排序字段
+    // 说明：用于权限的排序显示
+    pub sort_order: Option<i32>,
+    // 用途：前端图标
+    // 说明：用于前端菜单图标显示
+    pub icon: Option<String>,
+    // 用途：状态
+    // 说明：权限启用/禁用状态（1启用，0禁用）
+    pub status: Option<i32>,
 }
 
 // 用途：实现PermissionAddDTO到RbacPermission的转换
@@ -72,14 +90,19 @@ impl From<PermissionAddDTO> for RbacPermission {
             name: arg.name.clone(),
             permission: arg.permission.clone(),
             path: arg.path.clone(),
+            permission_type: arg.permission_type.clone(),
+            description: arg.description.clone(),
+            sort_order: arg.sort_order.clone(),
+            icon: arg.icon.clone(),
+            status: arg.status.clone(),
             create_date: Some(DateTime::now()),
         }
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：权限编辑DTO结构体
 // 说明：封装编辑权限所需的参数
 pub struct ResEditDTO {
@@ -98,6 +121,21 @@ pub struct ResEditDTO {
     // 用途：权限路径
     // 说明：用于修改API路径与权限的映射
     pub path: Option<String>,
+    // 用途：权限类型
+    // 说明：区分权限类型（menu/button/api）
+    pub permission_type: Option<String>,
+    // 用途：权限描述
+    // 说明：权限的详细描述
+    pub description: Option<String>,
+    // 用途：排序字段
+    // 说明：用于权限的排序显示
+    pub sort_order: Option<i32>,
+    // 用途：前端图标
+    // 说明：用于前端菜单图标显示
+    pub icon: Option<String>,
+    // 用途：状态
+    // 说明：权限启用/禁用状态（1启用，0禁用）
+    pub status: Option<i32>,
 }
 
 // 用途：实现&ResEditDTO到RbacPermission的转换
@@ -111,14 +149,19 @@ impl From<&ResEditDTO> for RbacPermission {
             name: arg.name.clone(),
             permission: arg.permission.clone(),
             path: arg.path.clone(),
+            permission_type: arg.permission_type.clone(),
+            description: arg.description.clone(),
+            sort_order: arg.sort_order.clone(),
+            icon: arg.icon.clone(),
+            status: arg.status.clone(),
             create_date: None,
         }
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：角色分页查询DTO结构体
 // 说明：封装角色分页查询所需的参数
 pub struct RolePageDTO {
@@ -143,9 +186,9 @@ impl From<&RolePageDTO> for PageRequest {
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：角色添加DTO结构体
 // 说明：封装添加角色所需的参数
 pub struct RoleAddDTO {
@@ -171,9 +214,9 @@ impl From<RoleAddDTO> for RbacRole {
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：角色编辑DTO结构体
 // 说明：封装编辑角色所需的参数
 pub struct RoleEditDTO {
@@ -205,9 +248,9 @@ impl From<RoleEditDTO> for RbacRole {
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：系统角色资源添加DTO结构体
 // 说明：封装添加角色及其关联资源所需的参数
 pub struct SysRoleResAddDTO {
@@ -235,9 +278,9 @@ impl From<SysRoleResAddDTO> for RoleAddDTO {
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：系统角色资源更新DTO结构体
 // 说明：封装更新角色及其关联资源所需的参数
 pub struct SysRoleResUpdateDTO {
@@ -270,9 +313,9 @@ impl From<SysRoleResUpdateDTO> for RoleEditDTO {
     }
 }
 
-// 用途：派生序列化、反序列化、克隆和调试特性
-// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 用途：派生序列化、反序列化、克隆、调试和Schema特性
+// 说明：支持JSON序列化和反序列化，方便在网络中传输；支持克隆和调试，便于开发和测试；支持OpenAPI文档生成
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 // 用途：系统角色资源分页查询DTO结构体
 // 说明：封装系统角色资源分页查询所需的参数
 pub struct SysRoleResPageDTO {

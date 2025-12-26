@@ -4,11 +4,13 @@
 
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
+use std::sync::Arc;
+use crate::context::ServiceContext;
 
 /// 创建静态资源路由
 /// 
 /// 返回静态文件服务配置，支持SPA应用
-pub fn create_resource_router() -> Router {
+pub fn create_resource_router() -> Router<Arc<ServiceContext>> {
     Router::new().fallback_service(
         // 用途：定义静态目录服务
         // 说明：提供dist目录下的静态文件访问

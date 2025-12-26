@@ -1,6 +1,6 @@
 // 用途：导入AI处理管道相关结构体
 // 说明：用于初始化管道配置表结构
-use crate::domain::table::provider::{Pipeline, PipelinePluginConfig};
+use crate::domain::table::provider::{Pipeline, PipelinePluginConfig, Provider};
 // 用途：导入AI模型定义相关结构体
 // 说明：用于初始化模型定义表结构
 use crate::domain::table::ai_hub::model_definition::ModelDefinition;
@@ -16,6 +16,12 @@ use crate::domain::table::ai_hub::price_rule::AiHubPriceRule;
 // 用途：导入API密钥相关结构体
 // 说明：用于初始化API密钥表结构
 use crate::domain::table::ai_hub::api_key::ApiKey;
+// 用途：导入计费标准相关结构体
+// 说明：用于初始化计费标准表结构
+use crate::domain::table::ai_hub::pricing::Pricing;
+// 用途：导入交易相关结构体
+// 说明：用于初始化交易表结构
+use crate::domain::table::ai_hub::transaction::Transaction;
 // 用途：导入日志级别枚举
 // 说明：用于控制日志输出级别
 use log::LevelFilter;
@@ -75,6 +81,23 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
     // 用途：获取数据库连接
     // 说明：用于执行表同步操作
     let conn = rb.acquire().await.expect("connection database fail");
+    
+    // 用途：同步供应商表结构
+    // 说明：存储各种AI服务供应商的基础配置信息
+    use crate::domain::table::provider::Provider;
+    let table = Provider {
+        id: Some(Default::default()),
+        name: Default::default(),
+        provider_type: Default::default(),
+        config_details: Default::default(),
+        enabled: Some(Default::default()),
+        base_price: Some(Default::default()),
+        context_price: Some(Default::default()),
+        output_price: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "provider").await;
     
     // 用途：同步供应商配置表结构
     // 说明：存储各种AI服务供应商的基础配置信息
@@ -264,6 +287,35 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
         last_used_at: Some(Default::default()),
     };
     let _ = RBatis::sync(&conn, mapper, &table, "api_key").await;
+    
+    // 用途：同步计费标准表结构
+    // 说明：管理AI模型的计费标准
+    let table = Pricing {
+        id: Some(Default::default()),
+        model_id: Default::default(),
+        input_price: Default::default(),
+        output_price: Default::default(),
+        status: Default::default(),
+        description: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "pricing").await;
+    
+    // 用途：同步交易表结构
+    // 说明：记录用户余额的所有变更历史，使用自定义表名"user_transaction"避免SQL保留字冲突
+    let table = Transaction {
+        id: Some(Default::default()),
+        userId: Default::default(),
+        type_: Default::default(),
+        amount: Default::default(),
+        balanceBefore: Default::default(),
+        balanceAfter: Default::default(),
+        operatorId: Some(Default::default()),
+        reason: Default::default(),
+        createdAt: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "user_transaction").await;
 }
 
 // 用途：初始化AI Hub默认数据
@@ -307,6 +359,29 @@ pub async fn ai_hub_sync_tables_data(rb: &RBatis) {
             status: Some("active".to_string()),
             description: Some("OpenAI AI Service Provider".to_string()),
             documentation_url: Some("https://platform.openai.com/docs".to_string()),
+            created_at: Some(DateTime::now()),
+            updated_at: Some(DateTime::now()),
+        },
+    )
+    .await;
+
+    // 用途：插入Provider表数据
+    // 说明：为ProviderRegistry提供基础数据
+    let _ = Provider::insert(
+        &conn,
+        &Provider {
+            id: Some(openai_provider_id.clone()),
+            name: "OpenAI".to_string(),
+            provider_type: "openai".to_string(),
+            config_details: serde_json::json!({
+                "api_base": "https://api.openai.com/v1",
+                "api_key": "",
+                "timeout": 30
+            }),
+            enabled: Some(true),
+            base_price: Some(0.01),
+            context_price: Some(0.01),
+            output_price: Some(0.03),
             created_at: Some(DateTime::now()),
             updated_at: Some(DateTime::now()),
         },

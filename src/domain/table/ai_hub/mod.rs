@@ -32,3 +32,11 @@ pub use model_definition::*;
 // 用途：导出供应商配置表结构
 pub mod provider_config;
 pub use provider_config::*;
+
+// 用途：导出计费标准表结构
+pub mod pricing;
+pub use pricing::*;
+
+// 用途：导出交易表结构
+pub mod transaction;
+pub use transaction::*;

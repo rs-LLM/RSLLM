@@ -237,10 +237,10 @@ impl SysUserService {
     pub async fn sign_in(&self, arg: &SignInDTO) -> Result<SignInVO> {
         // 用途：检查是否需要等待登录
         // 说明：防止登录重试频率过高
-        self.is_need_wait_login_ex(&arg.account).await?;
+        self.is_need_wait_login_ex(&arg.username).await?;
         // 用途：根据账号查询用户
         // 说明：获取用户信息用于验证
-        let user: Option<SysUser> = SysUser::select_by_map(pool!(), value! {"account": &arg.account})
+        let user: Option<SysUser> = SysUser::select_by_map(pool!(), value! {"account": &arg.username})
             .await?
             .into_iter()
             .next();
@@ -250,7 +250,7 @@ impl SysUserService {
             Error::from(format!(
                 "{}={}",
                 error_info!("account_not_exists"),
-                arg.account
+                arg.username
             ))
         })?;
         // 用途：检查用户是否被禁用
@@ -294,7 +294,7 @@ impl SysUserService {
                 // 说明：验证用户输入的验证码是否正确
                 let cache_code = CONTEXT
                     .cache_service
-                    .get_string(&format!("captch:account_{}", &arg.account))
+                    .get_string(&format!("captch:account_{}", &arg.username))
                     .await?;
                 if arg.vcode == ""
                     || cache_code
@@ -326,7 +326,7 @@ impl SysUserService {
                     .cache_service
                     .get_string(&format!(
                         "{}{}",
-                        CONTEXT.config.sms_cache_send_key_prefix, &arg.account
+                        CONTEXT.config.sms_cache_send_key_prefix, &arg.username
                     ))
                     .await?;
                 // 用途：检查短信验证码
@@ -339,7 +339,7 @@ impl SysUserService {
         // 用途：检查是否有错误
         // 说明：有错误则记录重试次数并返回错误
         if let Some(e) = &error {
-            self.add_retry_login_limit_num(&arg.account).await?;
+            self.add_retry_login_limit_num(&arg.username).await?;
             return Err(e.clone());
         }
         // 用途：获取用户信息
@@ -481,11 +481,20 @@ impl SysUserService {
         // 说明：使用JWT算法生成令牌
         sign_vo.access_token = jwt_token.create_token(&CONTEXT.config.jwt_secret)?;
         // 用途：获取用户角色
-        // 说明：为登录响应添加角色信息
-        sign_vo.roles = CONTEXT
+        // 说明：为登录响应添加角色信息，只提取角色名称并去重
+        let role_vos = CONTEXT
             .rbac_user_role_service
             .find_user_role(&sign_vo.id.clone().unwrap_or_default())
             .await?;
+        // 用途：提取角色名称并去重
+        // 说明：Vben前端只需要角色名称数组，不需要完整的角色对象
+        use std::collections::HashSet;
+        let mut role_set = HashSet::new();
+        sign_vo.roles = role_vos
+            .into_iter()
+            .filter_map(|role| role.name)
+            .filter(|role| role_set.insert(role.clone()))
+            .collect();
         // 用途：返回登录VO
         // 说明：告知调用者获取成功并返回数据
         Ok(sign_vo)
@@ -591,5 +600,19 @@ impl SysUserService {
         // 用途：返回权限列表
         // 说明：告知调用者查询成功并返回数据
         Ok(perms)
+    }
+
+    /// 用途：检查用户是否是超级管理员
+    /// 说明：通过查询用户的角色关联，判断是否具有超级管理员角色
+    pub async fn is_super_admin(&self, user_id: &str) -> Result<bool> {
+        // 用途：获取用户角色
+        // 说明：通过用户ID查询其关联的角色
+        let roles = CONTEXT
+            .rbac_user_role_service
+            .find_user_role(user_id)
+            .await?;
+        // 用途：检查是否具有超级管理员角色
+        // 说明：超级管理员角色ID为"1"
+        Ok(roles.iter().any(|role| role.id == Some("1".to_string())))
     }
 }

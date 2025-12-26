@@ -4,9 +4,6 @@ use crate::context::CONTEXT;
 // 用途：导入JWT令牌结构体
 // 说明：用于令牌验证和权限检查
 use crate::domain::vo::JWTToken;
-// 用途：导入错误信息函数
-// 说明：用于返回权限拒绝的错误信息
-use crate::error_info;
 
 // 用途：认证中间件结构体
 // 说明：作为认证相关方法的命名空间
@@ -52,6 +49,7 @@ pub async fn check_auth(token: &JWTToken, path: &str) -> Result<(), crate::error
         }
     }
     // 用途：返回权限拒绝错误
-    // 说明：如果没有匹配的权限，拒绝访问请求
-    Err(crate::error::Error::from(error_info!("access_denied")))
+    // 说明：如果没有匹配的权限，拒绝访问请求，返回详细的错误信息
+    let error_message = format!("您没有权限访问该资源，所需路径: {}", path);
+    Err(crate::error::Error::AuthError(error_message))
 }

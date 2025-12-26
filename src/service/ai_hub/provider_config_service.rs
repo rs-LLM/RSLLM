@@ -34,40 +34,60 @@ pub trait ProviderConfigService: Send + Sync {
 }
 
 /// 创建供应商请求
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CreateProviderRequest {
     pub name: String,
     pub provider_type: String,
     pub api_base: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_config: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_input_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_output_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_concurrent_requests: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub circuit_breaker_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_threshold: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation_url: Option<String>,
 }
 
 /// 列表供应商请求
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct ListProvidersRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub keyword: Option<String>,
 }
 
 /// 列表供应商响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ListProvidersResponse {
     pub items: Vec<ProviderConfig>,
     pub total: i64,
@@ -76,23 +96,39 @@ pub struct ListProvidersResponse {
 }
 
 /// 更新供应商请求
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct UpdateProviderRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub api_base: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_config: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_input_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_output_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_concurrent_requests: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub circuit_breaker_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_threshold: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation_url: Option<String>,
 }
 

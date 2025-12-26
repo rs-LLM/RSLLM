@@ -13,10 +13,13 @@ use crate::domain::vo::rbac::SysRoleVO;
 // 用途：导入serde的序列化和反序列化特性
 // 说明：支持SysUserVO的JSON序列化和反序列化，便于在网络中传输
 use serde::{Deserialize, Serialize};
+// 用途：导入OpenAPI Schema支持
+// 说明：用于自动生成API文档
+use utoipa::ToSchema;
 
 // 用途：系统用户视图对象结构体
 // 说明：用于返回给客户端的用户信息，包含格式化后的创建时间和角色列表
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct SysUserVO {
     // 用途：用户ID
     // 说明：用户的唯一标识符
@@ -32,10 +35,14 @@ pub struct SysUserVO {
     pub name: Option<String>,
     // 用途：登录检查方式
     // 说明：定义用户登录时需要的验证方式
+    #[schema(value_type = Option<String>)]
     pub login_check: Option<LoginCheck>,
     // 用途：用户状态
     // 说明：控制用户是否可用，1表示启用，0表示禁用
     pub state: Option<i32>,
+    // 用途：用户余额
+    // 说明：存储用户的账户余额，用于计费系统
+    pub balance: Option<f64>,
     // 用途：创建时间
     // 说明：记录用户的创建时间，已格式化为字符串
     pub create_date: Option<String>,
@@ -57,6 +64,7 @@ impl From<SysUser> for SysUserVO {
             name: arg.name,
             login_check: arg.login_check,
             state: arg.state,
+            balance: arg.balance,
             create_date: arg
                 .create_date
                 .map(|v| v.format(&CONTEXT.config.datetime_format)),

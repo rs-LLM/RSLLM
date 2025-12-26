@@ -14,7 +14,7 @@ use uuid::Uuid;
 // 导入相关类型
 use crate::context::ServiceContext;
 use crate::domain::dto::completion::CompletionRequest;
-use crate::domain::vo::RespVO;
+use crate::domain::vo::response::ApiResponse;
 use crate::service::{TokenCounter, Content, TokenCountMeta};
 use crate::domain::vo::completion::{CompletionResponse, CompletionChoice};
 use crate::domain::vo::usage::Usage;
@@ -23,6 +23,21 @@ use crate::domain::dto::validation::Validator;
 /// 文本补全接口
 ///
 /// 提供OpenAI兼容的文本补全功能
+#[utoipa::path(
+    post,
+    path = "/api/v1/completions",
+    request_body = CompletionRequest,
+    responses(
+        (status = 200, description = "文本补全成功", body = ApiResponse<CompletionResponse>),
+        (status = 400, description = "参数错误", body = ApiResponse<CompletionResponse>),
+        (status = 401, description = "未授权", body = ApiResponse<CompletionResponse>),
+        (status = 500, description = "服务器错误", body = ApiResponse<CompletionResponse>)
+    ),
+    tag = "completion",
+    security(
+        ("api_key" = [])
+    )
+)]
 #[axum::debug_handler]
 pub async fn completions(
     headers: HeaderMap,
@@ -37,7 +52,7 @@ pub async fn completions(
     // 1. 用户认证
     let user_id = match authenticate_user(&headers, &state) {
         Ok(id) => id,
-        Err(e) => return RespVO::from_error(e.to_string()),
+        Err(e) => return Json(ApiResponse::error("401", &e.to_string())),
     };
     log::info!("[AI Hub] User authenticated: {}", user_id);
     
@@ -55,14 +70,14 @@ pub async fn completions(
         Ok(_) => log::info!("[AI Hub] Input validation passed"),
         Err(e) => {
             log::warn!("[AI Hub] Input validation failed: {}", e);
-            return RespVO::from_error(format!("输入验证失败: {}", e));
+            return Json(ApiResponse::error("400", &format!("输入验证失败: {}", e)));
         }
     }
     
     // 3. Token计算
     let token_meta = match calculate_tokens(&req) {
         Ok(meta) => meta,
-        Err(e) => return RespVO::from_error(e.to_string()),
+        Err(e) => return Json(ApiResponse::error("500", &e.to_string())),
     };
     log::info!("[AI Hub] Token calculation: input={}, model={}",
         token_meta.input_tokens, req.model);
@@ -85,7 +100,7 @@ pub async fn completions(
         "completion",
     ).await {
         Ok(fee) => fee,
-        Err(e) => return RespVO::from_error(e.to_string()),
+        Err(e) => return Json(ApiResponse::error("400", &e.to_string())),
     };
     
     log::info!("[AI Hub] Pre-consumption check passed: cost={:.2}", fee.total_cost);
@@ -106,13 +121,13 @@ pub async fn completions(
         })),
     ).await {
         Ok(id) => id,
-        Err(e) => return RespVO::from_error(format!("Failed to deduct quota and log: {}", e)),
+        Err(e) => return Json(ApiResponse::error("500", &format!("Failed to deduct quota and log: {}", e))),
     };
     
     log::info!("[AI Hub] Usage logged: {}", usage_log_id);
     
     // 7. 返回响应
-    RespVO::from(response)
+    Json(ApiResponse::success(response))
 }
 
 /// 用户认证

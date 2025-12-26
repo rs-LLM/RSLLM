@@ -35,6 +35,10 @@ use rbatis::{Page, PageRequest};
 // 说明：用于构建查询条件
 use rbs::value;
 
+// 用途：导入日期时间类型
+// 说明：用于记录创建时间
+use rbatis::rbdc::DateTime;
+
 /// 用途：权限服务
 /// 说明：处理权限相关业务逻辑，如权限的增删改查
 #[derive(Clone)]
@@ -75,9 +79,18 @@ impl RbacPermissionService {
                 rbatis::table_field_vec!(old, name)
             )));
         }
+        // 用途：设置默认值
+        // 说明：为新权限设置默认的创建时间和状态
+        let mut new_permission = arg.clone();
+        if new_permission.create_date.is_none() {
+            new_permission.create_date = Some(DateTime::now());
+        }
+        if new_permission.status.is_none() {
+            new_permission.status = Some(1);
+        }
         // 用途：插入权限数据
         // 说明：将新权限数据保存到数据库
-        let result = Ok(RbacPermission::insert(pool!(), &arg).await?.rows_affected);
+        let result = Ok(RbacPermission::insert(pool!(), &new_permission).await?.rows_affected);
         result
     }
 
@@ -116,6 +129,28 @@ impl RbacPermissionService {
         // 用途：返回删除结果
         // 说明：告知调用者删除成功
         Ok(num)
+    }
+
+    /// 用途：按类型查询权限
+    /// 说明：根据权限类型查询权限列表
+    pub async fn find_by_type(&self, permission_type: &str) -> Result<Vec<RbacPermission>> {
+        let data = RbacPermission::select_by_map(pool!(), value! {"permission_type": permission_type}).await?;
+        Ok(data)
+    }
+
+    /// 用途：更新权限状态
+    /// 说明：启用或禁用指定权限
+    pub async fn update_status(&self, id: &str, status: i32) -> Result<u64> {
+        let result = RbacPermission::update_by_map(
+            pool!(),
+            &RbacPermission {
+                id: Some(id.to_string()),
+                status: Some(status),
+                ..Default::default()
+            },
+            value! {"id": id}
+        ).await?;
+        Ok(result.rows_affected)
     }
 
     /// 用途：根据ID列表查询权限

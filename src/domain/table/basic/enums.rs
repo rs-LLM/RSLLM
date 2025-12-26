@@ -4,7 +4,6 @@ use serde::{Deserializer, Serializer};
 // 用途：导入格式化相关特性
 // 说明：支持LoginCheck枚举的调试和显示格式化
 use std::fmt::{Debug, Display, Formatter};
-
 // 用途：登录检查枚举
 // 说明：定义不同的登录验证方式，用于控制用户登录行为
 #[derive(Clone)]

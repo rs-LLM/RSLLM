@@ -29,6 +29,81 @@ use serde::{Deserialize, Deserializer};
 /// 说明：简化错误处理，统一使用自定义Error类型
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// 用途：标准错误码常量
+/// 说明：定义HTTP标准状态码对应的错误码
+pub mod error_codes {
+    // 用途：成功
+    pub const SUCCESS: &str = "0";
+    
+    // 用途：客户端错误 (4xx)
+    pub const BAD_REQUEST: &str = "400";
+    pub const UNAUTHORIZED: &str = "401";
+    pub const PAYMENT_REQUIRED: &str = "402";
+    pub const FORBIDDEN: &str = "403";
+    pub const NOT_FOUND: &str = "404";
+    pub const METHOD_NOT_ALLOWED: &str = "405";
+    pub const CONFLICT: &str = "409";
+    pub const UNPROCESSABLE_ENTITY: &str = "422";
+    pub const TOO_MANY_REQUESTS: &str = "429";
+    
+    // 用途：服务器错误 (5xx)
+    pub const INTERNAL_SERVER_ERROR: &str = "500";
+    pub const BAD_GATEWAY: &str = "502";
+    pub const SERVICE_UNAVAILABLE: &str = "503";
+    
+    // 用途：认证错误码 (10000-10999)
+    pub const AUTH_INVALID_TOKEN: &str = "10001";
+    pub const AUTH_TOKEN_EXPIRED: &str = "10002";
+    pub const AUTH_TOKEN_INVALID: &str = "10003";
+    pub const AUTH_UNAUTHORIZED: &str = "10004";
+    pub const AUTH_FORBIDDEN: &str = "10005";
+    
+    // 用途：验证错误码 (11000-11999)
+    pub const VALIDATION_INVALID_PARAM: &str = "11001";
+    pub const VALIDATION_MISSING_PARAM: &str = "11002";
+    pub const VALIDATION_INVALID_FORMAT: &str = "11003";
+    pub const VALIDATION_OUT_OF_RANGE: &str = "11004";
+    
+    // 用途：资源未找到错误码 (12000-12999)
+    pub const NOT_FOUND_RESOURCE: &str = "12001";
+    pub const NOT_FOUND_USER: &str = "12002";
+    pub const NOT_FOUND_PROVIDER: &str = "12003";
+    pub const NOT_FOUND_BILL: &str = "12004";
+    pub const NOT_FOUND_PRICE_RULE: &str = "12005";
+    
+    // 用途：限流错误码 (13000-13999)
+    pub const RATE_LIMIT_EXCEEDED: &str = "13001";
+    pub const RATE_LIMIT_API: &str = "13002";
+    pub const RATE_LIMIT_USER: &str = "13003";
+    
+    // 用途：服务端错误码 (20000-20999)
+    pub const SERVER_INTERNAL_ERROR: &str = "20001";
+    pub const SERVER_CONFIG_ERROR: &str = "20002";
+    pub const SERVER_ENCRYPTION_ERROR: &str = "20003";
+    
+    // 用途：数据库错误码 (21000-21999)
+    pub const DATABASE_CONNECTION_ERROR: &str = "21001";
+    pub const DATABASE_QUERY_ERROR: &str = "21002";
+    pub const DATABASE_TRANSACTION_ERROR: &str = "21003";
+    pub const DATABASE_DUPLICATE_KEY: &str = "21004";
+    
+    // 用途：外部服务错误码 (22000-22999)
+    pub const EXTERNAL_SERVICE_ERROR: &str = "22001";
+    pub const EXTERNAL_SERVICE_TIMEOUT: &str = "22002";
+    pub const EXTERNAL_SERVICE_UNAVAILABLE: &str = "22003";
+    
+    // 用途：业务错误码 (30000-30999)
+    pub const BUSINESS_INVALID_OPERATION: &str = "30001";
+    pub const BUSINESS_INVALID_STATE: &str = "30002";
+    pub const BUSINESS_QUOTA_EXCEEDED: &str = "30003";
+    pub const BUSINESS_BILLING_ERROR: &str = "30004";
+    pub const BUSINESS_PRICE_RULE_ERROR: &str = "30005";
+    pub const BUSINESS_STORAGE_ERROR: &str = "30006";
+    
+    // 用途：通用错误
+    pub const UNKNOWN_ERROR: &str = "99999";
+}
+
 /// 用途：通用错误枚举
 /// 说明：表示应用程序中所有可能的失败方式
 #[derive(Debug)]
@@ -102,28 +177,94 @@ impl axum::response::IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         use axum::http::StatusCode;
         use axum::Json;
-        use serde_json::json;
+        use crate::domain::vo::ApiResponse;
+        use crate::error::error_codes::*;
         
-        // 根据错误类型确定HTTP状态码
-        let status_code = match self {
-            Error::BusinessError(_) => StatusCode::BAD_REQUEST,
-            Error::AuthError(_) => StatusCode::UNAUTHORIZED,
-            Error::NotFound(_) => StatusCode::NOT_FOUND,
-            Error::ValidationError(_) => StatusCode::BAD_REQUEST,
-            Error::RateLimitExceeded => StatusCode::TOO_MANY_REQUESTS,
-            Error::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::EncryptionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::ExternalServiceError(_) => StatusCode::BAD_GATEWAY,
-            Error::ConfigError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::E(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        let error_message = self.to_string();
+        let (status_code, error_code) = match self {
+            Error::AuthError(msg) => {
+                let code = if msg.contains("token") || msg.contains("Token") {
+                    if msg.contains("expired") || msg.contains("过期") {
+                        AUTH_TOKEN_EXPIRED
+                    } else {
+                        AUTH_INVALID_TOKEN
+                    }
+                } else if msg.contains("forbidden") || msg.contains("禁止") {
+                    AUTH_FORBIDDEN
+                } else {
+                    AUTH_UNAUTHORIZED
+                };
+                (StatusCode::UNAUTHORIZED, code)
+            }
+            Error::ValidationError(msg) => {
+                let code = if msg.contains("missing") || msg.contains("缺失") {
+                    VALIDATION_MISSING_PARAM
+                } else if msg.contains("format") || msg.contains("格式") {
+                    VALIDATION_INVALID_FORMAT
+                } else if msg.contains("range") || msg.contains("范围") {
+                    VALIDATION_OUT_OF_RANGE
+                } else {
+                    VALIDATION_INVALID_PARAM
+                };
+                (StatusCode::BAD_REQUEST, code)
+            }
+            Error::NotFound(msg) => {
+                let code = if msg.contains("user") || msg.contains("用户") {
+                    NOT_FOUND_USER
+                } else if msg.contains("provider") || msg.contains("供应商") {
+                    NOT_FOUND_PROVIDER
+                } else if msg.contains("bill") || msg.contains("账单") {
+                    NOT_FOUND_BILL
+                } else if msg.contains("price") || msg.contains("价格") {
+                    NOT_FOUND_PRICE_RULE
+                } else {
+                    NOT_FOUND_RESOURCE
+                };
+                (StatusCode::NOT_FOUND, code)
+            }
+            Error::RateLimitExceeded => (StatusCode::TOO_MANY_REQUESTS, RATE_LIMIT_EXCEEDED),
+            Error::BusinessError(msg) => {
+                let code = if msg.contains("quota") || msg.contains("配额") {
+                    BUSINESS_QUOTA_EXCEEDED
+                } else if msg.contains("bill") || msg.contains("账单") {
+                    BUSINESS_BILLING_ERROR
+                } else if msg.contains("price") || msg.contains("价格") {
+                    BUSINESS_PRICE_RULE_ERROR
+                } else if msg.contains("storage") || msg.contains("存储") {
+                    BUSINESS_STORAGE_ERROR
+                } else {
+                    BUSINESS_INVALID_OPERATION
+                };
+                (StatusCode::BAD_REQUEST, code)
+            }
+            Error::DatabaseError(msg) => {
+                let code = if msg.contains("connection") || msg.contains("连接") {
+                    DATABASE_CONNECTION_ERROR
+                } else if msg.contains("transaction") || msg.contains("事务") {
+                    DATABASE_TRANSACTION_ERROR
+                } else if msg.contains("duplicate") || msg.contains("重复") {
+                    DATABASE_DUPLICATE_KEY
+                } else {
+                    DATABASE_QUERY_ERROR
+                };
+                (StatusCode::INTERNAL_SERVER_ERROR, code)
+            }
+            Error::EncryptionError(_) => (StatusCode::INTERNAL_SERVER_ERROR, SERVER_ENCRYPTION_ERROR),
+            Error::ExternalServiceError(msg) => {
+                let code = if msg.contains("timeout") || msg.contains("超时") {
+                    EXTERNAL_SERVICE_TIMEOUT
+                } else if msg.contains("unavailable") || msg.contains("不可用") {
+                    EXTERNAL_SERVICE_UNAVAILABLE
+                } else {
+                    EXTERNAL_SERVICE_ERROR
+                };
+                (StatusCode::BAD_GATEWAY, code)
+            }
+            Error::ConfigError(_) => (StatusCode::INTERNAL_SERVER_ERROR, SERVER_CONFIG_ERROR),
+            Error::E(_) => (StatusCode::INTERNAL_SERVER_ERROR, SERVER_INTERNAL_ERROR),
         };
         
-        let response = json!({
-            "success": false,
-            "code": status_code.as_u16().to_string(),
-            "message": self.to_string(),
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        });
+        let response = ApiResponse::<()>::error(error_code, &error_message);
         
         (status_code, Json(response)).into_response()
     }
@@ -310,6 +451,8 @@ pub enum ApplicationError {
     NotFound { message: String, resource: Option<String>, id: Option<String> },
     /// 配额不足错误
     QuotaExceeded { message: String, user_id: Option<String>, required: Option<f64>, remaining: Option<f64> },
+    /// 余额不足错误
+    BalanceExceeded { message: String, user_id: Option<String>, required: Option<f64>, remaining: Option<f64> },
     /// 账单相关错误
     BillingError { message: String, bill_id: Option<String>, user_id: Option<String> },
     /// 价格规则错误
@@ -414,6 +557,23 @@ impl Display for ApplicationError {
                     _ => write!(f, "配额不足: {}", message),
                 }
             }
+            ApplicationError::BalanceExceeded { message, user_id, required, remaining } => {
+                match (user_id, required, remaining) {
+                    (Some(uid), Some(req), Some(rem)) => {
+                        write!(f, "余额不足 [用户: {}, 需要: {:.2}, 剩余: {:.2}]: {}", uid, req, rem, message)
+                    }
+                    (Some(uid), Some(req), None) => {
+                        write!(f, "余额不足 [用户: {}, 需要: {:.2}]: {}", uid, req, message)
+                    }
+                    (Some(uid), None, Some(rem)) => {
+                        write!(f, "余额不足 [用户: {}, 剩余: {:.2}]: {}", uid, rem, message)
+                    }
+                    (None, Some(req), Some(rem)) => {
+                        write!(f, "余额不足 [需要: {:.2}, 剩余: {:.2}]: {}", req, rem, message)
+                    }
+                    _ => write!(f, "余额不足: {}", message),
+                }
+            }
             ApplicationError::BillingError { message, bill_id, user_id } => {
                 match (bill_id, user_id) {
                     (Some(bid), Some(uid)) => write!(f, "账单错误 [账单: {}, 用户: {}]: {}", bid, uid, message),
@@ -461,33 +621,29 @@ impl axum::response::IntoResponse for ApplicationError {
     fn into_response(self) -> axum::response::Response {
         use axum::http::StatusCode;
         use axum::Json;
-        use serde_json::json;
+        use crate::domain::vo::ApiResponse;
         
-        // 根据错误类型确定HTTP状态码
-        let status_code = match self {
-            ApplicationError::BusinessError { .. } => StatusCode::BAD_REQUEST,
-            ApplicationError::AuthError { .. } => StatusCode::UNAUTHORIZED,
-            ApplicationError::NotFound { .. } => StatusCode::NOT_FOUND,
-            ApplicationError::ValidationError { .. } => StatusCode::BAD_REQUEST,
-            ApplicationError::RateLimitExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
-            ApplicationError::DatabaseError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            ApplicationError::EncryptionError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            ApplicationError::ExternalServiceError { .. } => StatusCode::BAD_GATEWAY,
-            ApplicationError::ConfigError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            ApplicationError::QuotaExceeded { .. } => StatusCode::PAYMENT_REQUIRED,
-            ApplicationError::BillingError { .. } => StatusCode::BAD_REQUEST,
-            ApplicationError::PriceRuleError { .. } => StatusCode::BAD_REQUEST,
-            ApplicationError::TokenError { .. } => StatusCode::UNAUTHORIZED,
-            ApplicationError::StorageError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            ApplicationError::GenericError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        // 根据错误类型确定HTTP状态码和错误码
+        let (status_code, error_code) = match self {
+            ApplicationError::BusinessError { .. } => (StatusCode::BAD_REQUEST, "400"),
+            ApplicationError::AuthError { .. } => (StatusCode::UNAUTHORIZED, "401"),
+            ApplicationError::NotFound { .. } => (StatusCode::NOT_FOUND, "404"),
+            ApplicationError::ValidationError { .. } => (StatusCode::BAD_REQUEST, "422"),
+            ApplicationError::RateLimitExceeded { .. } => (StatusCode::TOO_MANY_REQUESTS, "429"),
+            ApplicationError::DatabaseError { .. } => (StatusCode::INTERNAL_SERVER_ERROR, "500"),
+            ApplicationError::EncryptionError { .. } => (StatusCode::INTERNAL_SERVER_ERROR, "500"),
+            ApplicationError::ExternalServiceError { .. } => (StatusCode::BAD_GATEWAY, "502"),
+            ApplicationError::ConfigError { .. } => (StatusCode::INTERNAL_SERVER_ERROR, "500"),
+            ApplicationError::QuotaExceeded { .. } => (StatusCode::PAYMENT_REQUIRED, "402"),
+            ApplicationError::BalanceExceeded { .. } => (StatusCode::PAYMENT_REQUIRED, "402"),
+            ApplicationError::BillingError { .. } => (StatusCode::BAD_REQUEST, "400"),
+            ApplicationError::PriceRuleError { .. } => (StatusCode::BAD_REQUEST, "400"),
+            ApplicationError::TokenError { .. } => (StatusCode::UNAUTHORIZED, "401"),
+            ApplicationError::StorageError { .. } => (StatusCode::INTERNAL_SERVER_ERROR, "500"),
+            ApplicationError::GenericError { .. } => (StatusCode::INTERNAL_SERVER_ERROR, "500"),
         };
         
-        let response = json!({
-            "success": false,
-            "code": status_code.as_u16().to_string(),
-            "message": self.to_string(),
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        });
+        let response = ApiResponse::<()>::error(error_code, &self.to_string());
         
         (status_code, Json(response)).into_response()
     }
@@ -510,6 +666,7 @@ impl From<ApplicationError> for Error {
             ApplicationError::GenericError { message } => Error::E(message),
             // 对于新的错误类型，转换为合适的Error类型
             ApplicationError::QuotaExceeded { message, .. } => Error::BusinessError(message),
+            ApplicationError::BalanceExceeded { message, .. } => Error::BusinessError(message),
             ApplicationError::BillingError { message, .. } => Error::BusinessError(message),
             ApplicationError::PriceRuleError { message, .. } => Error::BusinessError(message),
             ApplicationError::TokenError { message, .. } => Error::AuthError(message),

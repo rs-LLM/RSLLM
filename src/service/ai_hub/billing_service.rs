@@ -1,9 +1,11 @@
 //! 计费服务模块
 //! 提供费用计算、配额检查和用量记录功能
 use crate::domain::table::ai_hub::usage_log::AiHubUsageLog;
+use crate::domain::table::ai_hub::user_quota::AiHubUserQuota;
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::pool;
 use crate::domain::vo::usage_log::AiHubUsageLogVO;
+use crate::domain::table::basic::SysUser;
 use rbatis::rbdc::DateTime;
 use std::cmp::min;
 use std::str::FromStr;
@@ -104,9 +106,10 @@ impl BillingService {
         })
     }
 
-    /// 扣减配额并记录用量
+    /// 扣减配额和余额并记录用量
     ///
-    /// 原子操作：扣减配额并创建用量记录，任何步骤失败都会自动回滚
+    /// 原子操作：扣减配额、扣减余额并创建用量记录，任何步骤失败都会自动回滚
+    /// 实现配额和余额的双重控制机制
     pub async fn deduct_quota_and_log(
         &self,
         fee: &CalculatedFee,
@@ -118,7 +121,34 @@ impl BillingService {
         // 使用事务保证原子性
         let mut tx = pool!().acquire_begin().await?;
 
-        // 1. 扣减配额（使用事务版本）
+        // 1. 检查并扣减余额
+        let users = SysUser::select_by_map(&mut tx, rbs::value! { "id": &fee.user_id }).await?;
+        if users.is_empty() {
+            tx.rollback().await?;
+            return Err(ApplicationError::NotFound {
+                message: "User not found".to_string(),
+                resource: Some("user".to_string()),
+                id: Some(fee.user_id.clone()),
+            });
+        }
+
+        let mut user = users[0].clone();
+        let balance_before = user.balance.unwrap_or(0.0);
+
+        if balance_before < fee.total_cost {
+            tx.rollback().await?;
+            return Err(ApplicationError::ValidationError {
+                message: format!("余额不足：需要 {:.2}，剩余 {:.2}", fee.total_cost, balance_before),
+                field: Some("balance".to_string()),
+                value: Some(balance_before.to_string()),
+            });
+        }
+
+        let balance_after = balance_before - fee.total_cost;
+        user.balance = Some(balance_after);
+        SysUser::update_by_map(&mut tx, &user, rbs::value! { "id": &fee.user_id }).await?;
+
+        // 2. 扣减配额（使用事务版本）
         let deduct_dto = crate::domain::dto::DeductQuotaDTO {
             amount: fee.total_cost,
             request_id: Some(request_id.to_string()),
@@ -127,7 +157,7 @@ impl BillingService {
 
         match self.quota_service.deduct_batch_in_tx(&mut tx, &fee.user_id, vec![deduct_dto]).await {
             Ok(_) => {
-                // 2. 记录用量
+                // 3. 记录用量
                 let usage_log = AiHubUsageLog {
                     id: Some(uuid::Uuid::new_v4().to_string()),
                     request_id: request_id.to_string(),
@@ -147,7 +177,7 @@ impl BillingService {
                     status_code: Some(200),
                     response_time_ms: Some(duration_ms),
                     error_message: None,
-                    quota_deducted: Some(true),
+                    quota_deducted: Some(1),
                     quota_snapshot: None,
                     ip_address: None,
                     user_agent: None,
@@ -157,8 +187,8 @@ impl BillingService {
                 match AiHubUsageLog::insert(&mut tx, &usage_log).await {
                     Ok(_) => {
                         tx.commit().await?;
-                        log::info!("[BillingService] Deduct and log successful: user_id={}, request_id={}, amount={}",
-                            fee.user_id, request_id, fee.total_cost);
+                        log::info!("[BillingService] Deduct quota and balance successful: user_id={}, request_id={}, amount={}, balance_before={:.2}, balance_after={:.2}",
+                            fee.user_id, request_id, fee.total_cost, balance_before, balance_after);
                         Ok(usage_log.id.ok_or_else(|| ApplicationError::BusinessError {
                             message: "Failed to generate usage log ID".to_string(),
                             code: Some("USAGE_LOG_ID_GENERATION_FAILED".to_string()),
@@ -166,9 +196,9 @@ impl BillingService {
                         })?)
                     }
                     Err(e) => {
-                        // 用量记录失败，回滚配额扣减
+                        // 用量记录失败，回滚配额扣减和余额扣减
                         tx.rollback().await?;
-                        log::error!("[BillingService] Failed to insert usage log, rolling back quota deduction: user_id={}, request_id={}, error={}",
+                        log::error!("[BillingService] Failed to insert usage log, rolling back quota and balance deduction: user_id={}, request_id={}, error={}",
                             fee.user_id, request_id, e);
                         Err(ApplicationError::DatabaseError {
                             message: e.to_string(),
@@ -179,7 +209,7 @@ impl BillingService {
                 }
             }
             Err(e) => {
-                // 配额扣减失败，回滚事务
+                // 配额扣减失败，回滚事务（包括余额扣减）
                 tx.rollback().await?;
                 log::error!("[BillingService] Failed to deduct quota: user_id={}, request_id={}, error={}",
                     fee.user_id, request_id, e);
@@ -333,21 +363,83 @@ impl BillingService {
 
     /// 回滚预消费
     ///
-    /// 当AI服务调用失败时，回滚之前预扣的配额
+    /// 当AI服务调用失败时，回滚之前预扣的配额和余额
     pub async fn rollback_pre_consumption(&self, fee: &CalculatedFee) -> ApplicationResult<()> {
-        // 使用quota_service的回滚接口
-        match self.quota_service.rollback_deduct(&fee.user_id, fee.total_cost).await {
-            Ok(_) => {
-                log::info!("[BillingService] Pre-consumption rolled back successfully: user_id={}, amount={}",
-                    fee.user_id, fee.total_cost);
-                Ok(())
+        let mut tx = pool!().acquire_begin().await?;
+        
+        let users = SysUser::select_by_map(
+            &mut tx,
+            rbs::value! {"id": &fee.user_id}
+        ).await?;
+        
+        let user = users.into_iter()
+            .next()
+            .ok_or_else(|| ApplicationError::NotFound {
+                message: "User not found".to_string(),
+                resource: Some("sys_user".to_string()),
+                id: Some(fee.user_id.clone()),
+            })?;
+        
+        let mut updated_user = user.clone();
+        updated_user.balance = user.balance.map(|b| b + fee.total_cost);
+        SysUser::update_by_map(
+            &mut tx,
+            &updated_user,
+            rbs::value! {"id": &fee.user_id}
+        ).await?;
+        
+        let quotas = AiHubUserQuota::select_by_map(
+            &mut tx,
+            rbs::value! {
+                "user_id": &fee.user_id,
+                "status": "active"
             }
-            Err(e) => {
-                log::error!("[BillingService] Failed to rollback pre-consumption: user_id={}, amount={}, error={}",
-                    fee.user_id, fee.total_cost, e);
-                Err(e)
-            }
+        ).await?;
+
+        if quotas.is_empty() {
+            tx.rollback().await?;
+            return Err(ApplicationError::QuotaExceeded {
+                message: "No active quota found for rollback".to_string(),
+                user_id: Some(fee.user_id.clone()),
+                required: Some(fee.total_cost),
+                remaining: Some(0.0),
+            });
         }
+
+        let mut quotas_sorted = quotas;
+        quotas_sorted.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+
+        let mut remaining_to_restore = fee.total_cost;
+
+        for mut quota in quotas_sorted {
+            if remaining_to_restore <= 0.0 {
+                break;
+            }
+
+            let restore_amount = if remaining_to_restore < quota.used_quota {
+                remaining_to_restore
+            } else {
+                quota.used_quota
+            };
+
+            quota.remaining_quota += restore_amount;
+            quota.used_quota -= restore_amount;
+            quota.updated_at = Some(DateTime::now());
+
+            AiHubUserQuota::update_by_map(
+                &mut tx,
+                &quota,
+                rbs::value! { "id": quota.id.clone().unwrap_or_default() }
+            ).await?;
+
+            remaining_to_restore -= restore_amount;
+        }
+        
+        tx.commit().await?;
+        
+        log::info!("[BillingService] Pre-consumption rolled back successfully: user_id={}, amount={}",
+            fee.user_id, fee.total_cost);
+        Ok(())
     }
 
     /// 预扣减配额并记录用量（带事务支持）
@@ -394,7 +486,7 @@ impl BillingService {
                     status_code: Some(200),
                     response_time_ms: Some(duration_ms),
                     error_message: None,
-                    quota_deducted: Some(true),
+                    quota_deducted: Some(1),
                     quota_snapshot: None,
                     ip_address: None,
                     user_agent: None,

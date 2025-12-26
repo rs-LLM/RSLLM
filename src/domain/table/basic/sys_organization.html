@@ -1,0 +1,39 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "https://raw.githubusercontent.com/rbatis/rbatis/master/rbatis-codegen/mybatis-3-mapper.dtd">
+<mapper>
+
+<!-- SysOrganization select_page -->
+<select id="select_page">
+    `select * from sys_organization`
+    <where>
+        <if test="dto.name != null">
+            ` and name like concat('%', #{dto.name}, '%')`
+        </if>
+        <if test="dto.code != null">
+            ` and code like concat('%', #{dto.code}, '%')`
+        </if>
+        <if test="dto.org_type != null">
+            ` and org_type = #{dto.org_type}`
+        </if>
+    </where>
+    <if test="do_count == false">
+        ` order by sort_order asc, create_date desc`
+    </if>
+</select>
+
+<!-- SysOrganization select_all_custom -->
+<select id="select_all_custom">
+    `select * from sys_organization order by sort_order asc, create_date desc`
+</select>
+
+<!-- SysOrganization select_by_parent_id -->
+<select id="select_by_parent_id">
+    `select * from sys_organization where parent_id = #{parent_id} order by sort_order asc, create_date desc`
+</select>
+
+<!-- SysOrganization select_top_level -->
+<select id="select_top_level">
+    `select * from sys_organization where parent_id is null or parent_id = '' order by sort_order asc, create_date desc`
+</select>
+
+</mapper>
+</html>

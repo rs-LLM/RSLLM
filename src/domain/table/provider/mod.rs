@@ -3,7 +3,7 @@
 use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize,Deserialize};
+use serde::{Serialize, Deserialize, Deserializer};
 // 用途：导入JSON序列化支持
 // 说明：用于配置详情和模型参数的JSON存储
 use serde_json;
@@ -11,9 +11,32 @@ use serde_json;
 // 说明：用于自动生成增删改查操作
 use rbatis::{crud};
 
+// 用途：自定义反序列化函数，支持从整数或布尔值反序列化为布尔类型
+// 说明：兼容数据库中存储的整数1/0和布尔值true/false
+fn deserialize_bool_from_int_or_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // 使用serde_json::Value作为中间层
+    let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+    
+    match value {
+        serde_json::Value::Bool(b) => Ok(Some(b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Some(i != 0))
+            } else {
+                Ok(None)
+            }
+        }
+        serde_json::Value::Null => Ok(None),
+        _ => Ok(None),
+    }
+}
+
 // 用途：AI服务提供商配置表结构体
 // 说明：用于存储各种AI服务提供商的基础配置信息，如OpenAI、Claude等
-#[derive(Clone, Debug,Serialize,Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Provider {
     // 用途：提供商ID
     // 说明：服务提供商的唯一标识符，用于区分不同的AI服务提供商
@@ -29,6 +52,8 @@ pub struct Provider {
     pub config_details: serde_json::Value,
     // 用途：是否启用
     // 说明：控制当前提供商配置是否可用，true表示启用，false表示禁用
+    // 支持从整数或布尔值反序列化，兼容数据库中的整数存储
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool")]
     pub enabled: Option<bool>,
     // 用途：基础定价（每1000 tokens）
     // 说明：供应商的基础定价，单位为分/1000 tokens
@@ -72,6 +97,7 @@ pub struct ModelDefinition {
     pub config_details: Option<serde_json::Value>,
     // 用途：是否启用
     // 说明：控制当前模型是否可用，true表示启用，false表示禁用
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool")]
     pub enabled: Option<bool>,
     // 用途：创建时间
     // 说明：记录模型的创建时间
@@ -103,6 +129,7 @@ pub struct Pipeline {
     pub description: Option<String>,
     // 用途：是否启用
     // 说明：控制当前管道是否可用，true表示启用，false表示禁用
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool")]
     pub enabled: Option<bool>,
     // 用途：创建时间
     // 说明：记录管道的创建时间
@@ -134,6 +161,7 @@ pub struct PipelinePluginConfig {
     pub config_data: serde_json::Value,
     // 用途：是否启用
     // 说明：控制当前插件是否可用，true表示启用，false表示禁用
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool")]
     pub enabled: Option<bool>,
     // 用途：管道中顺序
     // 说明：插件在管道中的执行顺序，数值越小越先执行

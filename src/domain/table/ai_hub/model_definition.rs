@@ -3,17 +3,43 @@
 use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, Deserializer};
 // 用途：导入JSON序列化支持
 // 说明：用于配置详情和能力列表的JSON存储
 use serde_json;
 // 用途：导入rbatis的CRUD宏
 // 说明：用于自动生成增删改查操作
 use rbatis::crud;
+// 用途：导入OpenAPI文档生成支持
+// 说明：用于自动生成API文档
+use utoipa::ToSchema;
+
+// 用途：自定义反序列化函数，支持从整数或布尔值反序列化为布尔类型
+// 说明：兼容数据库中存储的整数1/0和布尔值true/false
+fn deserialize_bool_from_int_or_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // 使用serde_json::Value作为中间层
+    let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+    
+    match value {
+        serde_json::Value::Bool(b) => Ok(Some(b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Some(i != 0))
+            } else {
+                Ok(None)
+            }
+        }
+        serde_json::Value::Null => Ok(None),
+        _ => Ok(None),
+    }
+}
 
 // 用途：AI模型定义表结构体（扩展版）
 // 说明：存储AI模型的完整配置信息，支持动态定价和限流
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, ToSchema)]
 pub struct ModelDefinition {
     // 用途：模型ID
     // 说明：模型的唯一标识符
@@ -53,6 +79,7 @@ pub struct ModelDefinition {
     pub max_requests_per_minute: Option<i32>,
     // 用途：是否启用
     // 说明：控制模型是否可用，true表示启用，false表示禁用
+    #[serde(deserialize_with = "deserialize_bool_from_int_or_bool")]
     pub enabled: Option<bool>,
     // 用途：状态
     // 说明：模型状态，如"active"、"maintenance"、"deprecated"
