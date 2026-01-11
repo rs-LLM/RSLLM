@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 // 用途：JWT认证令牌结构体
 // 说明：用于存储JWT令牌的声明信息，包含用户身份和权限
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq,Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Default)]
 pub struct JWTToken {
     // 用途：用户ID
     // 说明：标识令牌所属的用户
@@ -51,7 +51,7 @@ impl JWTToken {
             }),
         }
     }
-    
+
     // 用途：验证JWT令牌的有效性
     // 说明：检查令牌是否被篡改、是否过期等，确保令牌的合法性
     // secret: JWT签名密钥，用于验证令牌签名
@@ -59,7 +59,7 @@ impl JWTToken {
         let mut validation = Validation::default();
         validation.leeway = 0;
         match decode::<JWTToken>(
-            &token,
+            token,
             &DecodingKey::from_secret(secret.as_ref()),
             &validation,
         ) {
@@ -98,8 +98,8 @@ impl JWTToken {
             });
         }
         let mut jwt = self.clone();
-        jwt.exp = jwt.exp + jwt_exp;
-        jwt.create_token(&secret)
+        jwt.exp += jwt_exp;
+        jwt.create_token(secret)
     }
 }
 
@@ -126,7 +126,7 @@ mod test {
     // 用途：测试JWT功能
     // 说明：验证JWTToken的生成、验证和刷新功能是否正常
     #[test]
-    fn test_jwt() -> Result<(), ApplicationError>{
+    fn test_jwt() -> Result<(), ApplicationError> {
         let j = JWTToken {
             id: "1".to_string(),
             account: "189".to_string(),

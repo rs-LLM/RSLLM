@@ -31,22 +31,20 @@ use std::ops::{Deref, DerefMut};
 
 // 用途：令牌头键名常量
 // 说明：定义HTTP头中存储令牌的键名，统一使用"Authorization"
-pub const TOKEN_KEY: &'static str = "Authorization";
+pub const TOKEN_KEY: &str = "Authorization";
 
 // 用途：Axum认证中间件
 // 说明：用于验证请求中的JWT令牌，自动刷新即将过期的令牌
 pub async fn auth(mut request: Request, next: Next) -> Result<Response, Response> {
-    if let Ok(token) = get_token(&request.headers()) {
-        if let Some(token) = token_is_valid(&token) {
+    if let Ok(token) = get_token(request.headers()) {
+        if let Some(token) = token_is_valid(token) {
             let now = rbatis::rbdc::DateTime::now().unix_timestamp() as usize;
-            if (token.exp - now) < CONTEXT.config.jwt_refresh_token {
-                if let Ok(new_token) =
+            if (token.exp - now) < CONTEXT.config.jwt_refresh_token
+                && let Ok(new_token) =
                     token.refresh(&CONTEXT.config.jwt_secret, CONTEXT.config.jwt_exp)
-                {
-                    if let Ok(new_header) = http::HeaderValue::from_str(&new_token) {
-                        request.headers_mut().insert(TOKEN_KEY, new_header);
-                    }
-                }
+                && let Ok(new_header) = http::HeaderValue::from_str(&new_token)
+            {
+                request.headers_mut().insert(TOKEN_KEY, new_header);
             }
         } else {
             let error_response = axum::Json(serde_json::json!({
@@ -75,10 +73,7 @@ pub async fn auth(mut request: Request, next: Next) -> Result<Response, Response
 // 用途：验证令牌是否有效
 // 说明：检查令牌的签名是否有效以及是否过期
 fn token_is_valid(token: &str) -> Option<JWTToken> {
-    match checked_token(token) {
-        Ok(data) => Some(data),
-        Err(_) => None,
-    }
+    checked_token(token).ok()
 }
 
 // 用途：从请求头中获取令牌
@@ -131,9 +126,15 @@ impl<S: Sync> FromRequestParts<S> for JwtAuth {
                     Ok(v) => Ok(JwtAuth(v)),
                     Err(e) => {
                         let error_message = match e.to_string().as_str() {
-                            "无效的访问令牌，请重新登录" => "无效的访问令牌，请重新登录".to_string(),
-                            "无效的令牌发行者，请重新登录" => "无效的令牌发行者，请重新登录".to_string(),
-                            "访问令牌已过期，请重新登录" => "访问令牌已过期，请重新登录".to_string(),
+                            "无效的访问令牌，请重新登录" => {
+                                "无效的访问令牌，请重新登录".to_string()
+                            }
+                            "无效的令牌发行者，请重新登录" => {
+                                "无效的令牌发行者，请重新登录".to_string()
+                            }
+                            "访问令牌已过期，请重新登录" => {
+                                "访问令牌已过期，请重新登录".to_string()
+                            }
                             _ => "令牌验证失败，请重新登录".to_string(),
                         };
                         Err((StatusCode::UNAUTHORIZED, error_message))

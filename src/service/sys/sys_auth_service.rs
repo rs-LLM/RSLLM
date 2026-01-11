@@ -22,11 +22,11 @@ impl SysAuthService {
         // 用途：验证令牌有效性
         // 说明：确保用户提供的令牌是有效的
         let jwt = crate::middleware::auth::checked_token(&arg.access_token)?;
-        
+
         // 用途：检查权限
         // 说明：验证用户是否有权限访问请求的路径
         crate::middleware::auth::check_auth(&jwt, &arg.path).await?;
-        
+
         // 用途：返回验证后的JWT令牌
         // 说明：将验证结果返回给调用者
         Ok(jwt)

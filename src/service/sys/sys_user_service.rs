@@ -26,6 +26,10 @@ use crate::domain::dto::rbac::UserRoleAddDTO;
 // 说明：用于接收用户的各种请求参数
 use crate::domain::dto::{IdDTO, SignInDTO, UserAddDTO, UserEditDTO, UserPageDTO, UserRolePageDTO};
 
+// 用途：导入用户注册数据传输对象
+// 说明：用于接收用户注册请求
+use crate::domain::dto::basic::register::{RegisterResultDTO, UserRegisterDTO};
+
 // 用途：导入登录检查枚举
 // 说明：用于处理不同的登录验证方式
 use crate::domain::table::LoginCheck;
@@ -50,6 +54,10 @@ use crate::service::SetUserVO;
 // 说明：用于处理密码的加密和验证
 use crate::util::password_encoder::PasswordEncoder;
 
+// 用途：导入用户注册验证工具
+// 说明：用于验证邮箱和密码格式
+use crate::util::user_register_validation::UserRegisterValidator;
+
 // 用途：导入错误信息宏和数据库连接池宏
 // 说明：用于生成错误信息和获取数据库连接
 use crate::{error_info, pool};
@@ -64,7 +72,7 @@ use std::time::Duration;
 
 /// 用途：登录重试缓存键
 /// 说明：用于缓存登录失败重试次数
-const CACHE_KEY_RETRY: &'static str = "login:login_retry";
+const CACHE_KEY_RETRY: &str = "login:login_retry";
 
 /// 用途：后台用户服务
 /// 说明：处理用户相关业务逻辑，如登录、注册、权限管理等
@@ -97,10 +105,8 @@ impl SysUserService {
         CONTEXT.rbac_user_role_service.set_roles(&mut roles).await?;
         // 用途：遍历角色列表
         // 说明：将角色信息赋值给对应的用户VO
-        let mut idx = 0;
-        for x in roles {
+        for (idx, x) in roles.into_iter().enumerate() {
             vo.records[idx].roles = x.roles;
-            idx += 1;
         }
         // 用途：返回带角色信息的用户分页数据
         // 说明：告知调用者查询成功并返回数据
@@ -114,7 +120,8 @@ impl SysUserService {
     pub async fn page(&self, arg: UserPageDTO) -> Result<Page<SysUserVO>> {
         // 用途：查询用户分页数据
         // 说明：根据查询条件从数据库中获取分页数据
-        let sys_user_page = SysUser::select_page(pool!(),&PageRequest::from(arg.clone()),&arg).await?;
+        let sys_user_page =
+            SysUser::select_page(pool!(), &PageRequest::from(arg.clone()), &arg).await?;
         // 用途：转换为VO分页
         // 说明：将数据库实体转换为前端需要的VO
         let page = Page::<SysUserVO>::from(sys_user_page);
@@ -131,7 +138,7 @@ impl SysUserService {
         let user_id = arg.id.as_deref().unwrap_or_default();
         // 用途：查找用户
         // 说明：根据用户ID从数据库中查询用户数据
-        let user = self.find(&user_id).await?.ok_or_else(|| {
+        let user = self.find(user_id).await?.ok_or_else(|| {
             Error::from(format!("{}={}", error_info!("user_not_exists"), user_id))
         })?;
         // 用途：转换为用户VO
@@ -141,7 +148,7 @@ impl SysUserService {
         // 说明：查询用户关联的角色信息
         let roles = CONTEXT
             .rbac_user_role_service
-            .find_user_role(&user_id)
+            .find_user_role(user_id)
             .await?;
         // 用途：设置用户角色
         // 说明：将角色信息赋值给用户VO
@@ -223,7 +230,7 @@ impl SysUserService {
                 .add(UserRoleAddDTO {
                     id: None,
                     user_id: user.id.clone(),
-                    role_id: role_id,
+                    role_id,
                 })
                 .await?;
         }
@@ -240,10 +247,11 @@ impl SysUserService {
         self.is_need_wait_login_ex(&arg.username).await?;
         // 用途：根据账号查询用户
         // 说明：获取用户信息用于验证
-        let user: Option<SysUser> = SysUser::select_by_map(pool!(), value! {"account": &arg.username})
-            .await?
-            .into_iter()
-            .next();
+        let user: Option<SysUser> =
+            SysUser::select_by_map(pool!(), value! {"account": &arg.username})
+                .await?
+                .into_iter()
+                .next();
         // 用途：检查用户是否存在
         // 说明：用户不存在则登录失败
         let user = user.ok_or_else(|| {
@@ -296,7 +304,7 @@ impl SysUserService {
                     .cache_service
                     .get_string(&format!("captch:account_{}", &arg.username))
                     .await?;
-                if arg.vcode == ""
+                if arg.vcode.is_empty()
                     || cache_code
                         .to_lowercase()
                         .as_str()
@@ -528,12 +536,12 @@ impl SysUserService {
         let mut password = None;
         // 用途：检查密码是否被修改
         // 说明：密码被修改则需要重新加密
-        if arg.password != user.password {
-            if let Some(pass) = arg.password.as_ref() {
-                // 用途：加密密码
-                // 说明：将用户输入的密码加密后存储
-                password = Some(PasswordEncoder::encode(pass));
-            }
+        if arg.password != user.password
+            && let Some(pass) = arg.password.as_ref()
+        {
+            // 用途：加密密码
+            // 说明：将用户输入的密码加密后存储
+            password = Some(PasswordEncoder::encode(pass));
         }
         // 用途：设置密码
         // 说明：将加密后的密码赋值给实体
@@ -546,7 +554,7 @@ impl SysUserService {
                 .add(UserRoleAddDTO {
                     id: None,
                     user_id: arg.id.clone(),
-                    role_id: role_id,
+                    role_id,
                 })
                 .await?;
         }
@@ -614,5 +622,107 @@ impl SysUserService {
         // 用途：检查是否具有超级管理员角色
         // 说明：超级管理员角色ID为"1"
         Ok(roles.iter().any(|role| role.id == Some("1".to_string())))
+    }
+
+    /// 用途：用户注册
+    /// 说明：处理用户注册请求，验证输入并创建新用户
+    pub async fn register(&self, arg: &UserRegisterDTO) -> Result<RegisterResultDTO> {
+        // 用途：验证用户名称
+        // 说明：确保用户名称符合要求
+        UserRegisterValidator::validate_name(&arg.name)?;
+
+        // 用途：验证邮箱格式
+        // 说明：确保邮箱格式正确
+        UserRegisterValidator::validate_email(&arg.email)?;
+
+        // 用途：验证密码强度
+        // 说明：确保密码符合安全要求
+        UserRegisterValidator::validate_password(&arg.password)?;
+
+        // 用途：验证服务条款同意状态
+        // 说明：确保用户同意了服务条款
+        UserRegisterValidator::validate_agree_terms(arg.agree_terms)?;
+
+        // 用途：检查邮箱是否已存在
+        // 说明：防止重复注册
+        let existing_user = SysUser::select_by_map(pool!(), value! {"email": &arg.email})
+            .await?
+            .into_iter()
+            .next();
+
+        if existing_user.is_some() {
+            return Ok(RegisterResultDTO {
+                success: false,
+                message: "该邮箱已被注册".to_string(),
+                user_id: None,
+            });
+        }
+
+        // 用途：生成用户账号（使用用户名作为账号）
+        // 说明：使用用户名作为登录账号
+        let account = arg.name.clone();
+
+        // 用途：检查账号是否已存在
+        // 说明：防止账号冲突
+        let existing_account = self.find_by_account(&account).await?;
+        if existing_account.is_some() {
+            return Ok(RegisterResultDTO {
+                success: false,
+                message: "该用户名已被注册".to_string(),
+                user_id: None,
+            });
+        }
+
+        // 用途：查找"user"角色
+        // 说明：为新用户分配默认角色
+        let default_role = CONTEXT.rbac_role_service.find_by_name("user").await?;
+
+        let role_id = default_role.map(|role| role.id.unwrap_or_default());
+
+        // 用途：创建用户添加DTO
+        // 说明：准备用户数据
+        let user_add_dto = UserAddDTO {
+            account: Some(account.clone()),
+            password: Some(arg.password.clone()),
+            name: Some(arg.name.clone()),
+            email: Some(arg.email.clone()),
+            login_check: Some(LoginCheck::PasswordCheck),
+            role_id: role_id.clone(),
+            state: Some(1),
+            balance: Some(0.0),
+        };
+
+        // 用途：转换为数据库实体
+        // 说明：数据库操作需要使用实体对象
+        let user = SysUser::from(user_add_dto);
+
+        // 用途：插入用户数据
+        // 说明：将新用户数据保存到数据库
+        let _result = SysUser::insert(pool!(), &user).await?;
+
+        // 用途：获取用户ID
+        // 说明：用于后续操作和返回结果
+        let user_id = user.id.clone().unwrap_or_default();
+
+        // 用途：添加用户角色关联
+        // 说明：如果角色ID存在，为用户分配角色
+        if let Some(role_id) = role_id {
+            CONTEXT
+                .rbac_user_role_service
+                .add(UserRoleAddDTO {
+                    id: None,
+                    user_id: Some(user_id.clone()),
+                    role_id: Some(role_id.clone()),
+                })
+                .await?;
+        }
+
+        // 用途：返回注册结果
+        // 说明：告知调用者注册成功并返回用户ID
+        Ok(RegisterResultDTO {
+            success: true,
+            message: "注册成功".to_string(),
+            user_id: Some(user_id),
+        })
     }
 }

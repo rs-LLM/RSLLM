@@ -33,18 +33,12 @@ pub async fn check_auth(token: &JWTToken, path: &str) -> Result<(), crate::error
         // 用途：遍历系统中定义的所有权限
         // 说明：查找与用户权限匹配的系统权限
         for x in &sys_permission {
-            match &x.permission {
-                Some(permission) => match &x.path {
-                    None => {}
-                    Some(x_path) => {
-                        // 用途：检查权限和路径是否匹配
-                        // 说明：如果匹配则允许访问，否则继续检查
-                        if permission.eq(token_permission) && path.contains(x_path) {
-                            return Ok(());
-                        }
-                    }
-                },
-                _ => {}
+            if let (Some(permission), Some(x_path)) = (&x.permission, &x.path) {
+                // 用途：检查权限和路径是否匹配
+                // 说明：如果匹配则允许访问，否则继续检查
+                if permission.eq(token_permission) && path.contains(x_path) {
+                    return Ok(());
+                }
             }
         }
     }

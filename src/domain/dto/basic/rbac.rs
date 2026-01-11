@@ -92,9 +92,9 @@ impl From<PermissionAddDTO> for RbacPermission {
             path: arg.path.clone(),
             permission_type: arg.permission_type.clone(),
             description: arg.description.clone(),
-            sort_order: arg.sort_order.clone(),
+            sort_order: arg.sort_order,
             icon: arg.icon.clone(),
-            status: arg.status.clone(),
+            status: arg.status,
             create_date: Some(DateTime::now()),
         }
     }
@@ -151,9 +151,9 @@ impl From<&ResEditDTO> for RbacPermission {
             path: arg.path.clone(),
             permission_type: arg.permission_type.clone(),
             description: arg.description.clone(),
-            sort_order: arg.sort_order.clone(),
+            sort_order: arg.sort_order,
             icon: arg.icon.clone(),
-            status: arg.status.clone(),
+            status: arg.status,
             create_date: None,
         }
     }

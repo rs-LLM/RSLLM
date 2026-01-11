@@ -6,10 +6,11 @@ use serde::{Deserializer, Serializer};
 use std::fmt::{Debug, Display, Formatter};
 // 用途：登录检查枚举
 // 说明：定义不同的登录验证方式，用于控制用户登录行为
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum LoginCheck {
     // 用途：无需检查
     // 说明：允许用户直接登录，无需额外验证
+    #[default]
     NoCheck,
     // 用途：密码检查
     // 说明：仅需要密码验证即可登录
@@ -24,13 +25,6 @@ pub enum LoginCheck {
 
 // 用途：为LoginCheck实现Default trait
 // 说明：提供默认值，方便在未指定时使用
-impl Default for LoginCheck {
-    // 用途：默认值方法
-    // 说明：默认无需检查，简化配置
-    fn default() -> Self {
-        LoginCheck::NoCheck
-    }
-}
 
 // 用途：实现LoginCheck到&str的转换
 // 说明：方便将枚举转换为字符串，用于存储和传输

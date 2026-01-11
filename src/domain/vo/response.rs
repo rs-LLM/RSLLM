@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 // 用途：导入OpenAPI Schema支持
 // 说明：用于自动生成API文档
 use utoipa::ToSchema;
+// 用途：导入Axum响应支持
+// 说明：用于将ApiResponse转换为HTTP响应
+use axum::{Json, response::IntoResponse};
+// 用途：导入DateTime类型
+// 说明：用于响应时间戳
+use rbatis::rbdc::DateTime;
 
 // 用途：标准API响应结构体
 // 说明：所有API接口的统一响应格式
@@ -26,7 +32,7 @@ pub struct ApiResponse<T> {
     pub data: Option<T>,
     // 用途：时间戳
     // 说明：响应生成的时间，格式为RFC3339
-    pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    pub timestamp: Option<DateTime>,
 }
 
 // 用途：实现ApiResponse的构造函数
@@ -40,7 +46,7 @@ impl<T> ApiResponse<T> {
             code: "0".to_string(),
             message: None,
             data: Some(data),
-            timestamp: Some(chrono::Utc::now()),
+            timestamp: Some(DateTime::now()),
         }
     }
 
@@ -52,7 +58,7 @@ impl<T> ApiResponse<T> {
             code: "0".to_string(),
             message: None,
             data: None,
-            timestamp: Some(chrono::Utc::now()),
+            timestamp: Some(DateTime::now()),
         }
     }
 
@@ -64,8 +70,16 @@ impl<T> ApiResponse<T> {
             code: code.to_string(),
             message: Some(message.to_string()),
             data: None,
-            timestamp: Some(chrono::Utc::now()),
+            timestamp: Some(DateTime::now()),
         }
+    }
+}
+
+// 用途：为ApiResponse实现IntoResponse trait
+// 说明：使ApiResponse可以直接作为Axum的HTTP响应返回
+impl<T: Serialize + Send + Sync> IntoResponse for ApiResponse<T> {
+    fn into_response(self) -> axum::response::Response {
+        Json(self).into_response()
     }
 }
 
@@ -130,7 +144,7 @@ pub struct ErrorResponse {
     pub details: Option<serde_json::Value>,
     // 用途：时间戳
     // 说明：错误发生的时间，格式为RFC3339
-    pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    pub timestamp: Option<DateTime>,
 }
 
 // 用途：实现ErrorResponse的构造函数
@@ -144,7 +158,7 @@ impl ErrorResponse {
             code: code.to_string(),
             message: message.to_string(),
             details: None,
-            timestamp: Some(chrono::Utc::now()),
+            timestamp: Some(DateTime::now()),
         }
     }
 
@@ -156,7 +170,7 @@ impl ErrorResponse {
             code: code.to_string(),
             message: message.to_string(),
             details: Some(details),
-            timestamp: Some(chrono::Utc::now()),
+            timestamp: Some(DateTime::now()),
         }
     }
 }

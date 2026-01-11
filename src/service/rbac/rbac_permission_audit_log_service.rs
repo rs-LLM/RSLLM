@@ -38,7 +38,7 @@ impl RbacPermissionAuditLogService {
         operator_name: &str,
     ) -> Result<u64> {
         let log = RbacPermissionAuditLog {
-            id: Some(uuid::Uuid::new_v4().to_string()),
+            id: Some(ulid::Ulid::new().to_string()),
             permission_id: Some(permission_id.to_string()),
             operation_type: Some("create".to_string()),
             old_value: None,
@@ -62,7 +62,7 @@ impl RbacPermissionAuditLogService {
         operator_name: &str,
     ) -> Result<u64> {
         let log = RbacPermissionAuditLog {
-            id: Some(uuid::Uuid::new_v4().to_string()),
+            id: Some(ulid::Ulid::new().to_string()),
             permission_id: Some(permission_id.to_string()),
             operation_type: Some("update".to_string()),
             old_value: Some(serde_json::to_string(old_value).unwrap_or_default()),
@@ -85,7 +85,7 @@ impl RbacPermissionAuditLogService {
         operator_name: &str,
     ) -> Result<u64> {
         let log = RbacPermissionAuditLog {
-            id: Some(uuid::Uuid::new_v4().to_string()),
+            id: Some(ulid::Ulid::new().to_string()),
             permission_id: Some(permission_id.to_string()),
             operation_type: Some("delete".to_string()),
             old_value: Some(serde_json::to_string(old_value).unwrap_or_default()),
@@ -101,7 +101,9 @@ impl RbacPermissionAuditLogService {
     /// 用途：查询审计日志
     /// 说明：根据权限ID查询审计日志
     pub async fn query_logs(&self, permission_id: &str) -> Result<Vec<RbacPermissionAuditLog>> {
-        let data = RbacPermissionAuditLog::select_by_map(pool!(), value! {"permission_id": permission_id}).await?;
+        let data =
+            RbacPermissionAuditLog::select_by_map(pool!(), value! {"permission_id": permission_id})
+                .await?;
         Ok(data)
     }
 

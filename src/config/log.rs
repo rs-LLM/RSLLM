@@ -55,7 +55,7 @@ pub fn init_log() {
     let _ = fast_log::init(cfg);
     // 用途：检查是否为发布模式
     // 说明：发布模式下提示日志输出配置
-    if CONTEXT.config.debug() == false {
+    if !CONTEXT.config.debug() {
         // 用途：输出发布模式提示
         // 说明：告知用户当前运行模式下的日志配置
         println!("[rsllm] release_mode is up! [file_log] open,[console_log] disabled!");
@@ -116,7 +116,7 @@ fn parse_rolling_type(log_rolling: &str) -> RollingType {
                     // 用途：按自定义分钟间隔滚动
                     // 说明：根据指定的分钟数创建滚动策略
                     rolling_type = RollingType::ByDuration((
-                        DateTime::now().0, // 当前时间
+                        DateTime::now().0,               // 当前时间
                         Duration::from_secs(value * 60), // 转换为秒
                     ));
                 // 用途：检查是否为小时间隔
@@ -131,7 +131,7 @@ fn parse_rolling_type(log_rolling: &str) -> RollingType {
                     // 用途：按自定义小时间隔滚动
                     // 说明：根据指定的小时数创建滚动策略
                     rolling_type = RollingType::ByDuration((
-                        DateTime::now().0, // 当前时间
+                        DateTime::now().0,                    // 当前时间
                         Duration::from_secs(value * 60 * 60), // 转换为秒
                     ));
                 // 用途：检查是否为天间隔
@@ -146,7 +146,7 @@ fn parse_rolling_type(log_rolling: &str) -> RollingType {
                     // 用途：按自定义天间隔滚动
                     // 说明：根据指定的天数创建滚动策略
                     rolling_type = RollingType::ByDuration((
-                        DateTime::now().0, // 当前时间
+                        DateTime::now().0,                         // 当前时间
                         Duration::from_secs(value * 24 * 60 * 60), // 转换为秒
                     ));
                 // 用途：处理未知滚动类型
@@ -168,19 +168,8 @@ fn parse_rolling_type(log_rolling: &str) -> RollingType {
 
 /// 用途：解析日志压缩方式
 /// 说明：将配置文件中的压缩策略字符串转换为fast_log的Packer实现
-fn parse_packer(packer: &str) -> Box<dyn Packer> {
-    // 用途：匹配压缩方式
-    // 说明：根据配置选择对应的压缩实现
-    match packer {
-        // 用途：注释掉的压缩方式
-        // 说明：当前版本暂不支持这些压缩方式，保留作为扩展
-        // "lz4" => Box::new(fast_log::plugin::packer::LZ4Packer {}),
-        // "zip" => Box::new(fast_log::plugin::packer::ZipPacker {}),
-        // "gzip" => Box::new(fast_log::plugin::packer::GZipPacker {}),
-        // 用途：默认压缩方式
-        // 说明：使用fast_log默认的日志压缩实现
-        _ => Box::new(fast_log::plugin::packer::LogPacker {}),
-    }
+fn parse_packer(_packer: &str) -> Box<dyn Packer> {
+    Box::new(fast_log::plugin::packer::LogPacker {})
 }
 
 /// 用途：解析日志文件大小

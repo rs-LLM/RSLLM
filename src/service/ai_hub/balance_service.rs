@@ -12,7 +12,7 @@ use crate::domain::vo::ai_hub::BalanceVO;
 use super::transaction_service::TransactionService;
 // 用途：导入交易DTO
 // 说明：用于创建交易记录
-use crate::domain::dto::ai_hub::{RechargeDTO, DeductDTO, SetBalanceDTO};
+use crate::domain::dto::ai_hub::{DeductDTO, RechargeDTO, SetBalanceDTO};
 // 用途：导入数据库连接池
 // 说明：用于获取数据库连接
 use crate::pool;
@@ -25,6 +25,12 @@ pub struct BalanceService {
     transaction_service: TransactionService,
 }
 
+impl Default for BalanceService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BalanceService {
     pub fn new() -> Self {
         Self {
@@ -35,7 +41,7 @@ impl BalanceService {
     /// 查询用户余额
     pub async fn get_balance(&self, user_id: &str) -> ApplicationResult<BalanceVO> {
         let users = SysUser::select_by_map(pool!(), rbs::value! { "id": user_id }).await?;
-        
+
         if users.is_empty() {
             return Err(crate::error::ApplicationError::NotFound {
                 message: "User not found".to_string(),
@@ -43,9 +49,9 @@ impl BalanceService {
                 id: Some(user_id.to_string()),
             });
         }
-        
+
         let user = &users[0];
-        
+
         Ok(BalanceVO {
             user_id: user.id.clone().unwrap_or_default(),
             username: user.account.clone().unwrap_or_default(),
@@ -54,7 +60,11 @@ impl BalanceService {
     }
 
     /// 充值
-    pub async fn recharge(&self, dto: RechargeDTO, operator_id: Option<String>) -> ApplicationResult<String> {
+    pub async fn recharge(
+        &self,
+        dto: RechargeDTO,
+        operator_id: Option<String>,
+    ) -> ApplicationResult<String> {
         self.transaction_service.recharge(dto, operator_id).await
     }
 
@@ -64,7 +74,11 @@ impl BalanceService {
     }
 
     /// 设置余额
-    pub async fn set_balance(&self, dto: SetBalanceDTO, operator_id: Option<String>) -> ApplicationResult<String> {
+    pub async fn set_balance(
+        &self,
+        dto: SetBalanceDTO,
+        operator_id: Option<String>,
+    ) -> ApplicationResult<String> {
         self.transaction_service.set_balance(dto, operator_id).await
     }
 

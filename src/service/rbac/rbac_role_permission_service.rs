@@ -58,8 +58,8 @@ impl RbacRolePermissionService {
         let role_page = CONTEXT
             .rbac_role_service
             .page(&RolePageDTO {
-                page_no: arg.page_no.clone(),
-                page_size: arg.page_size.clone(),
+                page_no: arg.page_no,
+                page_size: arg.page_size,
                 name: arg.name.clone(),
             })
             .await?;
@@ -81,7 +81,7 @@ impl RbacRolePermissionService {
         }
         // 用途：根据角色ID列表查询角色权限关联
         // 说明：从数据库中获取指定角色的权限关联
-        let datas = RbacRolePermission::select_by_map(pool!(), value! {"role_id":role_ids}).await?;
+        let datas = RbacRolePermission::select_by_role_ids(pool!(), role_ids).await?;
         // 用途：返回查询结果
         // 说明：告知调用者查询成功并返回数据
         Ok(datas)

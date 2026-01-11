@@ -5,11 +5,6 @@
 pub mod chat;
 pub use chat::*;
 
-// 用途：导出文本完成相关DTO
-// 说明：包含文本生成请求等DTO
-pub mod completion;
-pub use completion::*;
-
 // 用途：导出消息内容相关DTO
 // 说明：包含聊天消息、角色定义、内容格式等DTO
 pub mod content;
@@ -32,7 +27,7 @@ pub use response_format::*;
 
 // 用途：导出流式处理相关DTO
 // 说明：包含流式响应数据、分块处理等DTO
-pub mod streaming;  
+pub mod streaming;
 pub use streaming::*;
 
 // 用途：导出用量记录相关DTO
@@ -42,10 +37,6 @@ pub use usage_log::*;
 // 用途：导出用户配额相关DTO
 pub mod user_quota;
 pub use user_quota::*;
-
-// 用途：导出账单相关DTO
-pub mod billing;
-pub use billing::*;
 
 // 用途：导出价格规则相关DTO
 pub mod price_rule;
@@ -67,3 +58,20 @@ pub use transaction::*;
 // 说明：包含统一的输入参数验证功能
 pub mod validation;
 pub use validation::*;
+
+// 用途：导出API密钥相关DTO
+pub mod api_key;
+pub use api_key::*;
+
+// 用途：导出等级模型限制相关DTO
+pub mod user_level_model_limit;
+pub use user_level_model_limit::*;
+
+// 用途：导出用户等级配置相关DTO
+pub mod user_level_config;
+pub use user_level_config::*;
+
+// 用途：导出Responses API相关DTO
+// 说明：包含Responses API请求和响应等DTO
+pub mod responses;
+pub use responses::*;

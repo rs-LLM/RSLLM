@@ -36,7 +36,7 @@ use rbs::value;
 
 /// 用途：字典缓存键
 /// 说明：用于缓存所有字典数据
-const DICT_KEY: &'static str = "sys_dict:all";
+const DICT_KEY: &str = "sys_dict:all";
 
 /// 用途：字典服务
 /// 说明：处理字典相关业务逻辑
@@ -63,10 +63,12 @@ impl SysDictService {
     pub async fn add(&self, arg: &SysDict) -> Result<u64> {
         // 用途：检查字典是否已存在
         // 说明：避免重复添加字典
-        let old = SysDict::select_by_map(pool!(), value! {"id":arg.id.as_deref().unwrap_or_default()}).await?;
+        let old =
+            SysDict::select_by_map(pool!(), value! {"id":arg.id.as_deref().unwrap_or_default()})
+                .await?;
         // 用途：如果字典已存在，返回错误
         // 说明：确保字典的唯一性
-        if old.len() > 0 {
+        if !old.is_empty() {
             return Err(Error::from(format!(
                 "{},code={}",
                 error_info!("dict_exists"),
@@ -75,7 +77,7 @@ impl SysDictService {
         }
         // 用途：插入字典数据
         // 说明：将新字典保存到数据库
-        let result = Ok(SysDict::insert(pool!(), &arg).await?.rows_affected);
+        let result = Ok(SysDict::insert(pool!(), arg).await?.rows_affected);
         // 用途：更新字典缓存
         // 说明：确保缓存中的字典数据与数据库一致
         self.update_cache().await?;

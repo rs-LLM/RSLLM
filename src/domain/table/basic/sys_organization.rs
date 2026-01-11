@@ -61,15 +61,15 @@ impl SysOrganization {
     // 用途：分页查询组织
     // 说明：支持根据条件分页查询组织列表
     htmlsql_select_page!(select_page(dto: &OrgPageDTO) -> SysOrganization => "src/domain/table/basic/sys_organization.html");
-    
+
     // 用途：查询所有组织
     // 说明：获取所有组织数据
     htmlsql!(select_all_custom(rb:&dyn Executor) -> Vec<SysOrganization> => "src/domain/table/basic/sys_organization.html");
-    
+
     // 用途：根据父ID查询组织
     // 说明：获取指定父组织下的子组织列表
     htmlsql!(select_by_parent_id(rb:&dyn Executor, parent_id:&str) -> Vec<SysOrganization> => "src/domain/table/basic/sys_organization.html");
-    
+
     // 用途：查询顶级组织
     // 说明：获取没有父组织的顶级组织列表
     htmlsql!(select_top_level(rb:&dyn Executor) -> Vec<SysOrganization> => "src/domain/table/basic/sys_organization.html");

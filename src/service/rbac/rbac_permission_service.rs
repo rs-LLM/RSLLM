@@ -2,7 +2,6 @@
 // 说明：用于访问其他服务
 use crate::context::CONTEXT;
 
-
 // 用途：导入权限相关的数据传输对象
 // 说明：用于接收权限的分页查询和编辑请求参数
 use crate::domain::dto::rbac::{PermissionPageDTO, ResEditDTO};
@@ -72,7 +71,7 @@ impl RbacPermissionService {
         .await?;
         // 用途：如果权限已存在，返回错误
         // 说明：确保权限的唯一性
-        if old.len() > 0 {
+        if !old.is_empty() {
             return Err(Error::from(format!(
                 "{}={:?}",
                 error_info!("permission_exists"),
@@ -90,8 +89,10 @@ impl RbacPermissionService {
         }
         // 用途：插入权限数据
         // 说明：将新权限数据保存到数据库
-        let result = Ok(RbacPermission::insert(pool!(), &new_permission).await?.rows_affected);
-        result
+
+        Ok(RbacPermission::insert(pool!(), &new_permission)
+            .await?
+            .rows_affected)
     }
 
     /// 用途：编辑权限
@@ -134,7 +135,9 @@ impl RbacPermissionService {
     /// 用途：按类型查询权限
     /// 说明：根据权限类型查询权限列表
     pub async fn find_by_type(&self, permission_type: &str) -> Result<Vec<RbacPermission>> {
-        let data = RbacPermission::select_by_map(pool!(), value! {"permission_type": permission_type}).await?;
+        let data =
+            RbacPermission::select_by_map(pool!(), value! {"permission_type": permission_type})
+                .await?;
         Ok(data)
     }
 
@@ -148,8 +151,9 @@ impl RbacPermissionService {
                 status: Some(status),
                 ..Default::default()
             },
-            value! {"id": id}
-        ).await?;
+            value! {"id": id},
+        )
+        .await?;
         Ok(result.rows_affected)
     }
 

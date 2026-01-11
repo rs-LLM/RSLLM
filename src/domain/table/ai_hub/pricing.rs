@@ -3,10 +3,10 @@
 use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // 用途：导入rbatis的CRUD宏
 // 说明：用于自动生成增删改查操作
-use rbatis::{crud};
+use rbatis::crud;
 
 // 用途：计费标准表结构体
 // 说明：管理AI模型的计费标准，包括输入和输出的价格

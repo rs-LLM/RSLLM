@@ -104,4 +104,12 @@ pub struct ChatCompletionMessage {
     // 说明：模型拒绝回答时的拒绝理由或内容
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
+    // 用途：推理内容
+    // 说明：模型的深度思考过程，用于Thinking Mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    // 用途：额外字段
+    // 说明：用于接收模型特定的额外字段，如小米模型的reasoning_content等
+    #[serde(default = "serde_json::Value::default", flatten)]
+    pub extra_fields: serde_json::Value,
 }

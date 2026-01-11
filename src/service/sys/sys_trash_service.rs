@@ -67,6 +67,12 @@ pub struct SysTrashService {
 
 // 用途：SysTrashService实现
 // 说明：提供回收站服务的核心功能
+impl Default for SysTrashService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SysTrashService {
     // 用途：创建回收站服务实例
     // 说明：初始化回收站服务，设置默认的清理日期
@@ -75,7 +81,7 @@ impl SysTrashService {
             recycle_date: Arc::new(Mutex::new(DateTime::now())),
         }
     }
-    
+
     // 用途：添加数据到回收站
     // 说明：将被删除的数据保存到回收站，以便后续恢复或查看
     pub async fn add<T>(&self, table_name: &str, args: &[T]) -> Result<u64, Error>
@@ -97,7 +103,7 @@ impl SysTrashService {
         // 说明：将每条数据转换为回收站记录
         for x in args {
             trashes.push(SysTrash {
-                id: Some(Ulid::new().to_string().into()),
+                id: Some(Ulid::new().to_string()),
                 table_name: Some(table_name.to_string()),
                 data: Some(serde_json::to_string(x).unwrap_or_default()),
                 create_date: Some(now.clone()),
@@ -156,22 +162,22 @@ impl Intercept for SysTrashService {
         if sql.starts_with("delete from ") {
             // 用途：创建通用SQL方言
             // 说明：用于解析SQL语句
-            let dialect = GenericDialect {}; 
+            let dialect = GenericDialect {};
             // 用途：解析SQL语句
             // 说明：获取删除操作的表名
             let mut v: Vec<Statement> = Parser::parse_sql(&dialect, &sql.clone())
                 .map_err(|e| Error::from(e.to_string()))?;
             // 用途：检查解析结果是否为空
             // 说明：确保SQL语句有效
-            if v.len() <= 0 {
+            if v.is_empty() {
                 return Err(Error::from("sql is empty"));
             }
             // 用途：提取表名
             // 说明：确定要删除数据的表
             let table = match v.remove(0) {
-                Statement::Delete { from, .. } => {
+                Statement::Delete(delete_stmt) => {
                     let mut data = "".to_string();
-                    match from {
+                    match &delete_stmt.from {
                         FromTable::WithFromKeyword(v) => {
                             for x in v {
                                 let x_str = &format!("{}", x);

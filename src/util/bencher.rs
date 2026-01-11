@@ -25,7 +25,7 @@ impl QPS for std::time::Instant {
         // 说明：将计算结果输出到控制台，方便查看
         println!(
             "use QPS: {} QPS/s",
-            (total as u128 * 1000000000 as u128 / time.as_nanos() as u128)
+            (total as u128 * 1000000000_u128 / time.as_nanos())
         );
     }
 

@@ -1,14 +1,14 @@
 //! 静态资源路由模块
-//! 
+//!
 //! 该模块定义静态文件服务，用于提供前端页面和静态资源访问
 
-use axum::Router;
-use tower_http::services::{ServeDir, ServeFile};
-use std::sync::Arc;
 use crate::context::ServiceContext;
+use axum::Router;
+use std::sync::Arc;
+use tower_http::services::{ServeDir, ServeFile};
 
 /// 创建静态资源路由
-/// 
+///
 /// 返回静态文件服务配置，支持SPA应用
 pub fn create_resource_router() -> Router<Arc<ServiceContext>> {
     Router::new().fallback_service(

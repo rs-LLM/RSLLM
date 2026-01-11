@@ -57,28 +57,28 @@ impl RbacRoleService {
             arg.name.as_deref().unwrap_or_default(),
         )
         .await?;
-        
+
         // 用途：提取角色ID集合
         // 说明：用于查询角色权限关系
         let role_ids: Vec<String> = rbatis::table_field_set!(&data.records, id)
             .iter()
             .map(|v| v.to_string())
             .collect();
-        
+
         // 用途：查询角色权限关系
         // 说明：获取角色和权限的关联关系
         let role_perms = CONTEXT
             .rbac_role_permission_service
             .find_by_role_ids(&role_ids)
             .await?;
-        
+
         // 用途：提取权限ID集合
         // 说明：用于查询权限详细信息
         let perm_ids: Vec<String> = rbatis::table_field_set!(&role_perms, permission_id)
             .iter()
             .map(|v| v.to_string())
             .collect();
-        
+
         // 用途：根据权限ID查询权限信息
         // 说明：获取权限的详细信息
         let perm_map = CONTEXT
@@ -86,7 +86,7 @@ impl RbacRoleService {
             .finds(perm_ids)
             .await?
             .into_map(|v| v.id.clone().unwrap_or_default());
-        
+
         // 用途：构建角色权限映射
         // 说明：将角色ID映射到其拥有的权限集合
         let role_perms = {
@@ -96,19 +96,19 @@ impl RbacRoleService {
                 if !map.contains_key(&role_id) {
                     map.insert(role_id.clone(), HashSet::new());
                 }
-                if let Some(role_perms) = map.get_mut(&role_id) {
-                    if let Some(v) = perm_map.get(x.permission_id.as_deref().unwrap_or_default()) {
-                        role_perms.insert(v.clone());
-                    }
+                if let Some(role_perms) = map.get_mut(&role_id)
+                    && let Some(v) = perm_map.get(x.permission_id.as_deref().unwrap_or_default())
+                {
+                    role_perms.insert(v.clone());
                 }
             }
             map
         };
-        
+
         // 用途：转换为角色VO分页
         // 说明：将数据库实体转换为前端需要的VO
         let mut page = Page::<SysRoleVO>::from(data);
-        
+
         // 用途：为每个角色设置权限
         // 说明：将权限信息添加到角色VO中
         for vo in &mut page.records {
@@ -121,7 +121,7 @@ impl RbacRoleService {
                 );
             }
         }
-        
+
         // 用途：返回带权限信息的角色分页数据
         // 说明：告知调用者查询成功并返回数据
         Ok(page)
@@ -201,5 +201,16 @@ impl RbacRoleService {
         // 用途：查询所有角色
         // 说明：从数据库中获取所有角色数据
         Ok(RbacRole::select_all(pool!()).await?)
+    }
+
+    /// 用途：根据名称查询角色
+    /// 说明：根据角色名称查询角色信息
+    pub async fn find_by_name(&self, name: &str) -> Result<Option<RbacRole>> {
+        // 用途：根据名称查询角色
+        // 说明：从数据库中查询指定名称的角色
+        Ok(RbacRole::select_by_map(pool!(), value! {"name": name})
+            .await?
+            .into_iter()
+            .next())
     }
 }

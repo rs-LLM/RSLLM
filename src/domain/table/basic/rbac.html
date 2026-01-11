@@ -37,4 +37,12 @@
     </if>
 </select>
 
+<!-- RbacRolePermission select_by_role_ids -->
+<select id="select_by_role_ids">
+    `select * from rbac_role_permission where role_id in`
+    <foreach collection="role_ids" item="id" open="(" separator="," close=")">
+        `#{id}`
+    </foreach>
+</select>
+
 </mapper>

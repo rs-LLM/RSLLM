@@ -13,6 +13,6 @@ pub struct SysAuthDTO {
     pub access_token: String,
     // 用途：认证路径
     // 说明：指定需要认证的资源路径
-    #[schema(example = "/api/v1/user/profile")]
+    #[schema(example = "/user/info")]
     pub path: String,
 }

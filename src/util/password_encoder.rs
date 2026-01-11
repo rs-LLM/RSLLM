@@ -15,7 +15,7 @@ impl PasswordEncoder {
         // 说明：方便存储和传输，十六进制字符串是人类可读的
         format!("{:x}", digest)
     }
-    
+
     // 用途：验证密码是否匹配
     // 说明：用于登录验证，支持明文密码和哈希密码的验证
     pub fn verify(password: &str, raw_password: &str) -> bool {

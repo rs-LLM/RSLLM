@@ -38,7 +38,7 @@ use axum::response::IntoResponse;
 /// 说明：处理字典的分页查询请求
 #[utoipa::path(
     post,
-    path = "/api/v1/sys/dict/page",
+    path = "/sys/dict/page",
     request_body = DictPageDTO,
     responses(
         (status = 200, description = "查询成功", body = ApiResponse<PageWrapper<SysDictVO>>),
@@ -71,7 +71,7 @@ pub async fn page(page: Json<DictPageDTO>) -> impl IntoResponse {
 /// 说明：处理字典的添加请求
 #[utoipa::path(
     post,
-    path = "/api/v1/sys/dict/add",
+    path = "/sys/dict/add",
     request_body = DictAddDTO,
     responses(
         (status = 200, description = "添加成功", body = ApiResponse<u64>),
@@ -95,7 +95,7 @@ pub async fn add(mut arg: Json<DictAddDTO>) -> impl IntoResponse {
     // 说明：字典状态为空时，默认设置为启用状态
     if arg.state.is_none() {
         arg.state = Some(1); // 用途：默认启用状态
-                           // 说明：字典创建时默认可用
+        // 说明：字典创建时默认可用
     }
     // 用途：将DTO转换为数据库实体
     // 说明：数据库操作需要使用实体对象
@@ -118,7 +118,7 @@ pub async fn add(mut arg: Json<DictAddDTO>) -> impl IntoResponse {
 /// 说明：处理字典的更新请求
 #[utoipa::path(
     post,
-    path = "/api/v1/sys/dict/update",
+    path = "/sys/dict/update",
     request_body = DictEditDTO,
     responses(
         (status = 200, description = "更新成功", body = ApiResponse<u64>),
@@ -146,7 +146,7 @@ pub async fn update(arg: Json<DictEditDTO>) -> impl IntoResponse {
 /// 说明：处理字典的删除请求
 #[utoipa::path(
     post,
-    path = "/api/v1/sys/dict/remove",
+    path = "/sys/dict/remove",
     request_body = IdDTO,
     responses(
         (status = 200, description = "删除成功", body = ApiResponse<u64>),

@@ -3,7 +3,7 @@
 use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize,Deserialize};
+use serde::{Deserialize, Serialize};
 
 // 用途：导入管道插件配置结构体
 // 说明：用于关联管道和插件配置
@@ -11,7 +11,7 @@ use crate::domain::table::provider::PipelinePluginConfig;
 
 // 用途：带插件的管道组合结构体
 // 说明：用于服务层和仓库层逻辑，不是直接的数据库模型，用于组合查询结果
-#[derive(Clone, Debug,Serialize,Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PipelineWithPlugins {
     // 用途：管道ID
     // 说明：管道的唯一标识符

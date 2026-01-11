@@ -25,6 +25,12 @@ pub mod key_value_config;
 // 用途：导出键值配置表结构
 // 说明：方便其他模块直接使用键值配置表结构
 pub use key_value_config::*;
+// 用途：导出初始化事务日志表结构
+// 说明：用于记录初始化事务执行日志
+pub mod init_transaction_log;
+// 用途：导出初始化事务日志表结构
+// 说明：方便其他模块直接使用初始化事务日志表结构
+pub use init_transaction_log::*;
 // 用途：导出系统字典表结构
 // 说明：包含系统配置字典等表结构
 pub mod sys_dict;

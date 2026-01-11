@@ -19,6 +19,10 @@ pub struct ChatCompletionChunk {
     pub choices: Vec<ChatCompletionChunkChoice>,
     /// 系统指纹（可选）
     pub system_fingerprint: Option<String>,
+    /// 额外字段
+    /// 用于接收模型特定的额外字段，如小米模型的特定响应字段
+    #[serde(default = "serde_json::Value::default", flatten)]
+    pub extra_fields: serde_json::Value,
 }
 
 /// 流式聊天完成选择器
@@ -27,9 +31,14 @@ pub struct ChatCompletionChunkChoice {
     /// 选择器索引
     pub index: i32,
     /// 增量数据
-    pub delta: ChatCompletionChunkDelta,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta: Option<ChatCompletionChunkDelta>,
     /// 完成原因
     pub finish_reason: Option<String>,
+    /// 额外字段
+    /// 用于接收模型特定的额外字段，如小米模型的特定响应字段
+    #[serde(default = "serde_json::Value::default", flatten)]
+    pub extra_fields: serde_json::Value,
 }
 
 /// 流式聊天完成增量
@@ -39,8 +48,14 @@ pub struct ChatCompletionChunkDelta {
     pub role: Option<String>,
     /// 内容
     pub content: Option<String>,
+    /// 推理内容
+    pub reasoning_content: Option<String>,
     /// 工具调用（可选）
     pub tool_calls: Option<Vec<ToolCallChunk>>,
+    /// 额外字段
+    /// 用于接收模型特定的额外字段，如小米模型的特定响应字段
+    #[serde(default = "serde_json::Value::default", flatten)]
+    pub extra_fields: serde_json::Value,
 }
 
 /// 工具调用块
@@ -106,10 +121,6 @@ pub struct WebSocketMessage {
 pub struct QuotaWarning {
     /// 用户ID
     pub user_id: String,
-    /// 剩余额度
-    pub remaining_quota: f64,
-    /// 使用率
-    pub usage_rate: f64,
     /// 警告消息
     pub message: String,
 }
@@ -151,6 +162,8 @@ pub struct ChatCompletionMessage {
     pub role: String,
     /// 内容
     pub content: Option<String>,
+    /// 推理内容
+    pub reasoning_content: Option<String>,
     /// 工具调用（可选）
     pub tool_calls: Option<Vec<ToolCall>>,
 }

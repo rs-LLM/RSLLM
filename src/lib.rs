@@ -6,5 +6,6 @@ pub mod error;
 pub mod middleware;
 pub mod providers;
 pub mod router;
+pub mod routers;
 pub mod service;
 pub mod util;

@@ -46,6 +46,9 @@ pub struct SysUserVO {
     // 用途：创建时间
     // 说明：记录用户的创建时间，已格式化为字符串
     pub create_date: Option<String>,
+    // 用途：用户等级
+    // 说明：用户等级（L1/L2/L3/L4/L5），用于速率限制和配额管理
+    pub user_level: Option<String>,
     // 用途：用户角色列表
     // 说明：存储用户拥有的角色信息
     pub roles: Vec<SysRoleVO>,
@@ -68,6 +71,7 @@ impl From<SysUser> for SysUserVO {
             create_date: arg
                 .create_date
                 .map(|v| v.format(&CONTEXT.config.datetime_format)),
+            user_level: arg.user_level,
             roles: vec![],
         }
     }

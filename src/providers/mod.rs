@@ -3,8 +3,6 @@
 
 // 子模块声明
 pub mod common;
-pub mod anthropic;
+pub mod openai_provider;
 pub mod provider;
 pub mod registry;
-pub mod openai_provider;
-pub mod claude_provider;

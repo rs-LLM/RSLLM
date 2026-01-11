@@ -13,10 +13,6 @@ pub use usage_log::*;
 pub mod user_quota;
 pub use user_quota::*;
 
-// 用途：导出账单表结构
-pub mod billing;
-pub use billing::*;
-
 // 用途：导出价格规则表结构
 pub mod price_rule;
 pub use price_rule::*;
@@ -25,9 +21,13 @@ pub use price_rule::*;
 pub mod api_key;
 pub use api_key::*;
 
-// 用途：导出模型定义表结构
-pub mod model_definition;
-pub use model_definition::*;
+// 用途：导出模型基础信息表结构
+pub mod model_base;
+pub use model_base::*;
+
+// 用途：导出模型-供应商映射表结构
+pub mod model_provider_mapping;
+pub use model_provider_mapping::*;
 
 // 用途：导出供应商配置表结构
 pub mod provider_config;
@@ -40,3 +40,15 @@ pub use pricing::*;
 // 用途：导出交易表结构
 pub mod transaction;
 pub use transaction::*;
+
+pub mod user_level_config;
+pub use user_level_config::*;
+
+pub mod quota_usage_history;
+pub use quota_usage_history::*;
+
+pub mod rate_limit_event;
+pub use rate_limit_event::*;
+
+pub mod user_level_model_rate_limit;
+pub use user_level_model_rate_limit::*;

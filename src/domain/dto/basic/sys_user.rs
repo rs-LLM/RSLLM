@@ -38,6 +38,9 @@ pub struct UserAddDTO {
     // 用途：用户姓名
     // 说明：用于显示用户名称
     pub name: Option<String>,
+    // 用途：用户邮箱
+    // 说明：用于用户注册和找回密码，唯一标识用户身份
+    pub email: Option<String>,
     // 用途：登录检查状态
     // 说明：用于控制用户登录行为
     #[schema(value_type = Option<String>)]
@@ -64,10 +67,12 @@ impl From<UserAddDTO> for SysUser {
             account: arg.account.clone(),
             password: PasswordEncoder::encode(&arg.password.unwrap_or_default()).into(),
             name: arg.name.clone(),
+            email: arg.email.clone(),
             login_check: arg.login_check.clone(),
             state: Some(arg.state.unwrap_or(1)),
             balance: arg.balance,
             create_date: DateTime::now().into(),
+            user_level: Some("L1".to_string()),
         }
     }
 }
@@ -100,9 +105,6 @@ pub struct UserEditDTO {
     // 用途：角色ID
     // 说明：用于修改用户关联的角色
     pub role_id: Option<String>,
-    // 用途：用户余额
-    // 说明：用于修改用户余额
-    pub balance: Option<f64>,
 }
 
 // 用途：实现UserEditDTO到SysUser的转换
@@ -116,10 +118,12 @@ impl From<UserEditDTO> for SysUser {
             account: arg.account,
             password: arg.password,
             name: arg.name,
+            email: None,
             login_check: arg.login_check,
             state: arg.state,
             create_date: None,
-            balance: arg.balance,
+            balance: None,
+            user_level: None,
         }
     }
 }
@@ -161,8 +165,8 @@ impl From<&UserRolePageDTO> for UserPageDTO {
     // 说明：从用户角色分页DTO中提取分页和查询参数
     fn from(arg: &UserRolePageDTO) -> Self {
         Self {
-            page_no: arg.page_no.clone(),
-            page_size: arg.page_size.clone(),
+            page_no: arg.page_no,
+            page_size: arg.page_size,
             account: arg.account.clone(),
             name: arg.name.clone(),
         }

@@ -198,6 +198,24 @@
       "status": 1
     },
     {
+      "name": "模型编辑",
+      "permission": "sys:model:edit",
+      "path": "/admin/model_update",
+      "permission_type": "button",
+      "description": "编辑模型配置",
+      "sort_order": 12,
+      "status": 1
+    },
+    {
+      "name": "提供商编辑",
+      "permission": "sys:provider:edit",
+      "path": "/admin/provider_update",
+      "permission_type": "button",
+      "description": "编辑提供商配置",
+      "sort_order": 13,
+      "status": 1
+    },
+    {
       "name": "用量统计",
       "permission": "ai:usage:view",
       "path": "/ai/usage",
@@ -205,6 +223,25 @@
       "description": "查看用量统计页面",
       "sort_order": 12,
       "icon": "usage",
+      "status": 1
+    },
+    {
+      "name": "管理员统计",
+      "permission": "admin:stats:view",
+      "path": "/admin/stats",
+      "permission_type": "menu",
+      "description": "查看管理员统计页面",
+      "sort_order": 13,
+      "icon": "stats",
+      "status": 1
+    },
+    {
+      "name": "刷新统计",
+      "permission": "admin:stats:refresh",
+      "path": "/admin/stats/refresh",
+      "permission_type": "button",
+      "description": "手动刷新统计数据",
+      "sort_order": 14,
       "status": 1
     },
     {
@@ -233,6 +270,33 @@
       "description": "管理余额",
       "sort_order": 22,
       "status": 1
+    }
+  ],
+
+  // 用途：默认角色列表
+  // 说明：系统启动时自动创建的默认角色
+  "default_roles": [
+    {
+      // 用途：角色名称
+      // 说明：管理员角色
+      "name": "admin",
+      // 用途：角色描述
+      // 说明：管理员角色，拥有所有权限
+      "description": "管理员角色，拥有所有权限",
+      // 用途：权限列表
+      // 说明：* 表示所有权限
+      "permissions": ["*"]
+    },
+    {
+      // 用途：角色名称
+      // 说明：普通用户角色
+      "name": "user",
+      // 用途：角色描述
+      // 说明：普通用户角色，拥有基础权限
+      "description": "普通用户角色，拥有基础权限",
+      // 用途：权限列表
+      // 说明：普通用户只能访问AI相关功能
+      "permissions": ["ai:hub:view", "ai:model:view", "ai:usage:view"]
     }
   ]
 }

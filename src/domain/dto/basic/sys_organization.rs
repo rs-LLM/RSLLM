@@ -148,8 +148,8 @@ impl From<&OrgEditDTO> for SysOrganization {
             parent_id: arg.parent_id.clone(),
             org_type: arg.org_type.clone(),
             description: arg.description.clone(),
-            sort_order: arg.sort_order.clone(),
-            status: arg.status.clone(),
+            sort_order: arg.sort_order,
+            status: arg.status,
             create_date: None,
         }
     }

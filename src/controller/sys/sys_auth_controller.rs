@@ -10,10 +10,6 @@ use crate::domain::dto::basic::auth::SysAuthDTO;
 // 说明：用于接收登录请求参数
 use crate::domain::dto::basic::sign_in::SignInDTO;
 
-// 用途：导入响应VO
-// 说明：用于统一HTTP响应格式
-use crate::domain::vo::RespVO;
-
 // 用途：导入统一API响应
 // 说明：用于OpenAPI文档生成
 use crate::domain::vo::response::ApiResponse;
@@ -54,7 +50,7 @@ use crate::middleware::auth_axum::JwtAuth;
 /// 说明：验证用户身份并返回访问令牌
 #[utoipa::path(
     post,
-    path = "/api/v1/auth/login",
+    path = "/auth/login",
     request_body = SignInDTO,
     responses(
         (status = 200, description = "登录成功", body = ApiResponse<LoginVO>),
@@ -63,26 +59,21 @@ use crate::middleware::auth_axum::JwtAuth;
     tag = "auth"
 )]
 pub async fn login(arg: Json<SignInDTO>) -> impl IntoResponse {
-    // 用途：调用系统用户服务进行登录验证
-    // 说明：验证用户账号和密码，返回用户信息和令牌
     let result = CONTEXT.sys_user_service.sign_in(&arg.0).await;
-    // 用途：处理登录结果
-    // 说明：成功时返回访问令牌，失败时返回401状态码
     use axum::http::StatusCode;
     match result {
         Ok(sign_in_vo) => {
-            // 用途：构建登录响应
-            // 说明：返回符合Vben前端期望的响应格式
             let vo = LoginVO {
                 access_token: sign_in_vo.access_token,
             };
-            (StatusCode::OK, axum::Json(RespVO::from(vo)))
+            (StatusCode::OK, axum::Json(ApiResponse::success(vo)))
         }
         Err(e) => {
-            // 用途：返回登录失败错误
-            // 说明：登录失败时返回401状态码
-            let resp_vo = RespVO::<LoginVO>::from_error(e.to_string());
-            (StatusCode::UNAUTHORIZED, axum::Json(resp_vo))
+            let error_msg = e.to_string();
+            (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(ApiResponse::error("-1", &error_msg)),
+            )
         }
     }
 }
@@ -91,7 +82,7 @@ pub async fn login(arg: Json<SignInDTO>) -> impl IntoResponse {
 /// 说明：验证用户是否有权限访问指定路径
 #[utoipa::path(
     post,
-    path = "/api/v1/auth/check",
+    path = "/auth/check",
     request_body = SysAuthDTO,
     responses(
         (status = 200, description = "认证检查成功", body = ApiResponse<bool>),
@@ -100,19 +91,16 @@ pub async fn login(arg: Json<SignInDTO>) -> impl IntoResponse {
     tag = "auth"
 )]
 pub async fn check(arg: Json<SysAuthDTO>) -> impl IntoResponse {
-    // 用途：调用系统认证服务检查权限
-    // 说明：验证用户令牌和请求路径的权限关系
     let result = CONTEXT.sys_auth_service.check_auth(arg.0).await;
-    // 用途：处理认证检查结果
-    // 说明：成功时返回200状态码，失败时返回401状态码
     use axum::http::StatusCode;
     match result {
-        Ok(_) => (StatusCode::OK, axum::Json(RespVO::from(true))),
+        Ok(_) => (StatusCode::OK, axum::Json(ApiResponse::success(true))),
         Err(e) => {
-            // 用途：返回401状态码
-            // 说明：认证失败时返回401状态码
-            let resp_vo = RespVO::<bool>::from_error(e.to_string());
-            (StatusCode::UNAUTHORIZED, axum::Json(resp_vo))
+            let error_msg = e.to_string();
+            (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(ApiResponse::error("-1", &error_msg)),
+            )
         }
     }
 }
@@ -121,7 +109,7 @@ pub async fn check(arg: Json<SysAuthDTO>) -> impl IntoResponse {
 /// 说明：验证当前access_token并延长有效期，返回符合Vben前端期望的格式
 #[utoipa::path(
     post,
-    path = "/api/v1/auth/refresh",
+    path = "/auth/refresh",
     responses(
         (status = 200, description = "Token刷新成功", body = ApiResponse<String>),
         (status = 401, description = "Token无效或已过期", body = ApiResponse<String>)
@@ -129,60 +117,44 @@ pub async fn check(arg: Json<SysAuthDTO>) -> impl IntoResponse {
     tag = "auth"
 )]
 pub async fn refresh_token(req: Request) -> impl IntoResponse {
-    // 用途：从请求头中获取令牌
-    // 说明：JWT令牌存储在请求头中，用于身份验证
     let token = req.headers().get(TOKEN_KEY);
-    // 用途：匹配令牌是否存在
-    // 说明：处理令牌存在和不存在的情况
     use axum::http::StatusCode;
     match token {
         Some(token) => {
-            // 用途：将令牌转换为字符串
-            // 说明：方便后续处理
             let token = token.to_str().unwrap_or("");
-            // 用途：去除Bearer前缀
-            // 说明：前端发送的令牌包含Bearer前缀，需要去除后才能验证
             let token = token.trim_start_matches("Bearer ");
-            // 用途：验证令牌
-            // 说明：确保令牌的有效性，防止伪造
             let jwt = JWTToken::verify(&CONTEXT.config.jwt_secret, token);
-            // 用途：检查令牌验证结果
-            // 说明：如果令牌无效，返回401状态码
             match jwt {
                 Ok(jwt_token) => {
-                    // 用途：延长令牌有效期
-                    // 说明：生成新的令牌，延长有效期
-                    let new_token = jwt_token.refresh(&CONTEXT.config.jwt_secret, CONTEXT.config.jwt_exp);
-                    // 用途：检查令牌生成结果
-                    // 说明：如果生成失败，返回错误信息
+                    let new_token =
+                        jwt_token.refresh(&CONTEXT.config.jwt_secret, CONTEXT.config.jwt_exp);
                     match new_token {
-                        Ok(access_token) => {
-                            // 用途：返回新的access_token
-                            // 说明：符合Vben前端期望的响应格式，data字段为字符串
-                            (StatusCode::OK, axum::Json(RespVO::from(access_token)))
-                        }
+                        Ok(access_token) => (
+                            StatusCode::OK,
+                            axum::Json(ApiResponse::success(access_token)),
+                        ),
                         Err(e) => {
-                            // 用途：返回令牌生成失败错误
-                            // 说明：令牌生成过程中出现错误
-                            let resp_vo = RespVO::<String>::from_error(e.to_string());
-                            (StatusCode::UNAUTHORIZED, axum::Json(resp_vo))
+                            let error_msg = e.to_string();
+                            (
+                                StatusCode::UNAUTHORIZED,
+                                axum::Json(ApiResponse::error("-1", &error_msg)),
+                            )
                         }
                     }
                 }
                 Err(e) => {
-                    // 用途：返回令牌验证失败错误
-                    // 说明：令牌无效或已过期，返回401状态码
-                    let resp_vo = RespVO::<String>::from_error(e.to_string());
-                    (StatusCode::UNAUTHORIZED, axum::Json(resp_vo))
+                    let error_msg = e.to_string();
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(ApiResponse::error("-1", &error_msg)),
+                    )
                 }
             }
         }
-        _ => {
-            // 用途：返回令牌为空的错误
-            // 说明：令牌是刷新Token的必要条件，返回401状态码
-            let resp_vo = RespVO::<String>::from_error("access_token_empty".to_string());
-            (StatusCode::UNAUTHORIZED, axum::Json(resp_vo))
-        }
+        _ => (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(ApiResponse::error("-1", "access_token_empty")),
+        ),
     }
 }
 
@@ -190,7 +162,7 @@ pub async fn refresh_token(req: Request) -> impl IntoResponse {
 /// 说明：清除用户登录状态
 #[utoipa::path(
     post,
-    path = "/api/v1/auth/logout",
+    path = "/auth/logout",
     responses(
         (status = 200, description = "退出登录成功", body = ApiResponse<String>),
         (status = 401, description = "Token无效", body = ApiResponse<String>)
@@ -198,48 +170,31 @@ pub async fn refresh_token(req: Request) -> impl IntoResponse {
     tag = "auth"
 )]
 pub async fn logout(req: Request) -> impl IntoResponse {
-    // 用途：从请求头中获取令牌
-    // 说明：JWT令牌存储在请求头中，用于身份验证
     let token = req.headers().get(TOKEN_KEY);
-    // 用途：匹配令牌是否存在
-    // 说明：处理令牌存在和不存在的情况
     use axum::http::StatusCode;
     match token {
         Some(token) => {
-            // 用途：将令牌转换为字符串
-            // 说明：方便后续处理
             let token = token.to_str().unwrap_or("");
-            // 用途：去除Bearer前缀
-            // 说明：前端发送的令牌包含Bearer前缀，需要去除后才能验证
             let token = token.trim_start_matches("Bearer ");
-            // 用途：验证令牌
-            // 说明：确保令牌的有效性，防止伪造
             let jwt = JWTToken::verify(&CONTEXT.config.jwt_secret, token);
-            // 用途：检查令牌验证结果
-            // 说明：如果令牌无效，返回401状态码
             match jwt {
-                Ok(_) => {
-                    // 用途：清除用户登录状态
-                    // 说明：如果使用Redis缓存，清除Token缓存
-                    // 当前使用JWT无状态认证，直接返回成功
-                    // 用途：返回响应
-                    // 说明：统一响应格式，包含状态码、消息和数据
-                    (StatusCode::OK, axum::Json(RespVO::from("logout_success".to_string())))
-                }
+                Ok(_) => (
+                    StatusCode::OK,
+                    axum::Json(ApiResponse::success("logout_success".to_string())),
+                ),
                 Err(e) => {
-                    // 用途：返回令牌验证失败错误
-                    // 说明：令牌无效或已过期，返回401状态码
-                    let resp_vo = RespVO::<String>::from_error(e.to_string());
-                    (StatusCode::UNAUTHORIZED, axum::Json(resp_vo))
+                    let error_msg = e.to_string();
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        axum::Json(ApiResponse::error("-1", &error_msg)),
+                    )
                 }
             }
         }
-        _ => {
-            // 用途：返回令牌为空的错误
-            // 说明：令牌是退出登录的必要条件，返回401状态码
-            let resp_vo = RespVO::<String>::from_error("access_token_empty".to_string());
-            (StatusCode::UNAUTHORIZED, axum::Json(resp_vo))
-        }
+        _ => (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(ApiResponse::error("-1", "access_token_empty")),
+        ),
     }
 }
 
@@ -247,7 +202,7 @@ pub async fn logout(req: Request) -> impl IntoResponse {
 /// 说明：从JWT令牌中提取用户权限码，返回符合Vben前端期望的格式
 #[utoipa::path(
     get,
-    path = "/api/v1/auth/codes",
+    path = "/auth/codes",
     responses(
         (status = 200, description = "获取权限码成功", body = ApiResponse<Vec<String>>),
         (status = 401, description = "Token无效", body = ApiResponse<Vec<String>>)
@@ -255,11 +210,10 @@ pub async fn logout(req: Request) -> impl IntoResponse {
     tag = "auth"
 )]
 pub async fn get_codes(jwt_auth: JwtAuth) -> impl IntoResponse {
-    // 用途：从JWT令牌中提取权限码
-    // 说明：JwtAuth提取器已验证令牌有效性，直接使用
     let permissions = jwt_auth.permissions.clone();
-    // 用途：返回权限码列表
-    // 说明：符合Vben前端期望的响应格式，data字段为字符串数组
     use axum::http::StatusCode;
-    (StatusCode::OK, axum::Json(RespVO::from(permissions)))
+    (
+        StatusCode::OK,
+        axum::Json(ApiResponse::success(permissions)),
+    )
 }

@@ -3,13 +3,13 @@
 use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 // 用途：导入JSON序列化支持
 // 说明：用于配置详情和模型参数的JSON存储
 use serde_json;
 // 用途：导入rbatis的CRUD宏
 // 说明：用于自动生成增删改查操作
-use rbatis::{crud};
+use rbatis::crud;
 
 // 用途：自定义反序列化函数，支持从整数或布尔值反序列化为布尔类型
 // 说明：兼容数据库中存储的整数1/0和布尔值true/false
@@ -19,7 +19,7 @@ where
 {
     // 使用serde_json::Value作为中间层
     let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
-    
+
     match value {
         serde_json::Value::Bool(b) => Ok(Some(b)),
         serde_json::Value::Number(n) => {
@@ -78,7 +78,7 @@ crud!(Provider {});
 
 // 用途：AI模型定义表结构体
 // 说明：用于存储AI模型的基础信息和配置参数
-#[derive(Clone, Debug,Serialize,Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelDefinition {
     // 用途：模型ID
     // 说明：模型的唯一标识符，用于区分不同的AI模型
@@ -113,7 +113,7 @@ crud!(ModelDefinition {});
 
 // 用途：AI处理管道表结构体
 // 说明：用于存储AI处理流程的配置信息，支持多步骤处理
-#[derive(Clone, Debug,Serialize,Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Pipeline {
     // 用途：管道ID
     // 说明：管道的唯一标识符，用于区分不同的处理管道
@@ -145,7 +145,7 @@ crud!(Pipeline {});
 
 // 用途：管道插件配置表结构体
 // 说明：用于存储管道中各个插件的具体配置信息
-#[derive(Clone, Debug,Serialize,Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PipelinePluginConfig {
     // 用途：插件配置ID
     // 说明：插件配置的唯一标识符

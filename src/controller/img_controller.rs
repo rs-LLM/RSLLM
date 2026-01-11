@@ -75,7 +75,11 @@ pub async fn captcha(arg: Query<CatpchaDTO>) -> impl IntoResponse {
     if CONTEXT.config.debug() {
         // 用途：输出验证码日志
         // 说明：记录账号和对应的验证码，便于调试
-        log::info!("account:{},captcha:{}", arg.account.as_deref().unwrap_or_default(), code);
+        log::info!(
+            "account:{},captcha:{}",
+            arg.account.as_deref().unwrap_or_default(),
+            code
+        );
     }
     // 用途：检查账号是否存在
     // 说明：只有当账号存在时才将验证码存入缓存
@@ -87,7 +91,10 @@ pub async fn captcha(arg: Query<CatpchaDTO>) -> impl IntoResponse {
             .set_string(
                 // 用途：构建缓存键
                 // 说明：使用账号作为缓存键的一部分，确保每个账号的验证码唯一
-                &format!("captch:account_{}", arg.account.as_deref().unwrap_or_default()),
+                &format!(
+                    "captch:account_{}",
+                    arg.account.as_deref().unwrap_or_default()
+                ),
                 code.as_str(),
             )
             .await;
@@ -96,7 +103,7 @@ pub async fn captcha(arg: Query<CatpchaDTO>) -> impl IntoResponse {
         println!("{:?}", result);
         // 用途：检查是否为发布模式
         // 说明：发布模式下需要处理缓存错误
-        if CONTEXT.config.debug() == false {
+        if !CONTEXT.config.debug() {
             // 用途：处理缓存错误
             // 说明：发布模式下缓存错误需要返回给客户端
             if let Err(e) = result {
@@ -114,17 +121,12 @@ pub async fn captcha(arg: Query<CatpchaDTO>) -> impl IntoResponse {
     }
     // 用途：构建验证码响应
     // 说明：返回生成的验证码图片
-    let resp = Response::builder()
-        .header("Access-Control-Allow-Origin", "*") // 用途：允许跨域请求
-        // 说明：验证码不需要缓存
+    Response::builder()
+        .header("Access-Control-Allow-Origin", "*")
         .header("Cache-Control", "no-cache")
-        .header("Content-Type", "image/png") // 用途：设置响应类型为PNG图片
-        // 说明：返回验证码图片数据
+        .header("Content-Type", "image/png")
         .body(Body::from(png))
-        .unwrap_or_default();
-    // 用途：转换为响应类型
-    // 说明：符合axum的响应要求
-    resp.into()
+        .unwrap_or_default()
 }
 
 /// 用途：生成验证码图片和字符串

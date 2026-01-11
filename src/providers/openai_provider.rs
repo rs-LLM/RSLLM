@@ -2,16 +2,16 @@
 
 use async_trait::async_trait;
 use reqwest::Client;
-use std::time::Duration;
 use serde_json::json;
+use std::time::Duration;
 
-use crate::error::{Result, Error};
-use crate::service::ai_hub::provider_trait::{
-    AIProvider, ChatCompletionRequest, ChatCompletionResponse, CompletionRequest, 
-    CompletionResponse, EmbeddingRequest, EmbeddingResponse, ModelInfo, 
-    ChatCompletionChunk, Message, Choice, Usage, EmbeddingInput, EmbeddingData, CompletionChoice
-};
+use crate::error::{Error, Result};
 use crate::service::ai_hub::ProviderConfig;
+use crate::service::ai_hub::provider_trait::{
+    AIProvider, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, Choice,
+    CompletionChoice, CompletionRequest, CompletionResponse, EmbeddingData, EmbeddingInput,
+    EmbeddingRequest, EmbeddingResponse, Message, ModelInfo, Usage,
+};
 
 /// OpenAI 供应商实现
 pub struct OpenAIProvider {
@@ -23,19 +23,18 @@ pub struct OpenAIProvider {
 impl OpenAIProvider {
     pub fn new(config: ProviderConfig) -> Result<Self> {
         let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(30));
-        
-        let client = Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|e| Error::ExternalServiceError(format!("Failed to create HTTP client: {}", e)))?;
-        
+
+        let client = Client::builder().timeout(timeout).build().map_err(|e| {
+            Error::ExternalServiceError(format!("Failed to create HTTP client: {}", e))
+        })?;
+
         Ok(Self {
             client,
             api_key: config.api_key,
             api_base: config.api_base,
         })
     }
-    
+
     /// 转换为 OpenAI 请求格式
     fn convert_request(&self, req: &ChatCompletionRequest) -> serde_json::Value {
         let mut request = json!({
@@ -57,7 +56,7 @@ impl OpenAIProvider {
                 msg
             }).collect::<Vec<_>>(),
         });
-        
+
         if let Some(stream) = req.stream {
             request["stream"] = json!(stream);
         }
@@ -88,31 +87,26 @@ impl OpenAIProvider {
         if let Some(tool_choice) = &req.tool_choice {
             request["tool_choice"] = json!(tool_choice);
         }
-        
+
         request
     }
-    
+
     /// 转换 OpenAI 响应为统一格式
     fn convert_response(&self, openai_resp: serde_json::Value) -> Result<ChatCompletionResponse> {
-        let id = openai_resp["id"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string();
-        
+        let id = openai_resp["id"].as_str().unwrap_or("unknown").to_string();
+
         let object = openai_resp["object"]
             .as_str()
             .unwrap_or("chat.completion")
             .to_string();
-        
-        let created = openai_resp["created"]
-            .as_i64()
-            .unwrap_or(0);
-        
+
+        let created = openai_resp["created"].as_i64().unwrap_or(0);
+
         let model = openai_resp["model"]
             .as_str()
             .unwrap_or("unknown")
             .to_string();
-        
+
         let choices = openai_resp["choices"]
             .as_array()
             .unwrap_or(&vec![])
@@ -124,38 +118,30 @@ impl OpenAIProvider {
                         .as_str()
                         .unwrap_or("assistant")
                         .to_string(),
-                    content: message_value["content"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string(),
-                    name: message_value["name"]
-                        .as_str()
-                        .map(|s| s.to_string()),
+                    content: message_value["content"].as_str().unwrap_or("").to_string(),
+                    name: message_value["name"].as_str().map(|s| s.to_string()),
                     tool_calls: None, // 简化处理
                     tool_call_id: message_value["tool_call_id"]
                         .as_str()
                         .map(|s| s.to_string()),
                 };
-                
+
                 Choice {
                     index: choice["index"].as_i64().unwrap_or(0) as i32,
                     message,
-                    finish_reason: choice["finish_reason"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string(),
+                    finish_reason: choice["finish_reason"].as_str().unwrap_or("").to_string(),
                     logprobs: None,
                 }
             })
             .collect();
-        
+
         let usage_value = &openai_resp["usage"];
         let usage = Usage {
             prompt_tokens: usage_value["prompt_tokens"].as_i64().unwrap_or(0) as i32,
             completion_tokens: usage_value["completion_tokens"].as_i64().unwrap_or(0) as i32,
             total_tokens: usage_value["total_tokens"].as_i64().unwrap_or(0) as i32,
         };
-        
+
         Ok(ChatCompletionResponse {
             id,
             object,
@@ -165,14 +151,14 @@ impl OpenAIProvider {
             usage,
         })
     }
-    
+
     /// 转换为 OpenAI 补全请求格式
     fn convert_completion_request(&self, req: &CompletionRequest) -> serde_json::Value {
         let mut request = json!({
             "model": req.model,
             "prompt": req.prompt,
         });
-        
+
         if let Some(stream) = req.stream {
             request["stream"] = json!(stream);
         }
@@ -194,58 +180,48 @@ impl OpenAIProvider {
         if let Some(stop) = &req.stop {
             request["stop"] = json!(stop);
         }
-        
+
         request
     }
-    
+
     /// 转换 OpenAI 补全响应为统一格式
-    fn convert_completion_response(&self, openai_resp: serde_json::Value) -> Result<CompletionResponse> {
-        let id = openai_resp["id"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string();
-        
+    fn convert_completion_response(
+        &self,
+        openai_resp: serde_json::Value,
+    ) -> Result<CompletionResponse> {
+        let id = openai_resp["id"].as_str().unwrap_or("unknown").to_string();
+
         let object = openai_resp["object"]
             .as_str()
             .unwrap_or("text_completion")
             .to_string();
-        
-        let created = openai_resp["created"]
-            .as_i64()
-            .unwrap_or(0);
-        
+
+        let created = openai_resp["created"].as_i64().unwrap_or(0);
+
         let model = openai_resp["model"]
             .as_str()
             .unwrap_or("unknown")
             .to_string();
-        
+
         let choices = openai_resp["choices"]
             .as_array()
             .unwrap_or(&vec![])
             .iter()
-            .map(|choice| {
-                CompletionChoice {
-                    index: choice["index"].as_i64().unwrap_or(0) as i32,
-                    text: choice["text"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string(),
-                    finish_reason: choice["finish_reason"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string(),
-                    logprobs: None,
-                }
+            .map(|choice| CompletionChoice {
+                index: choice["index"].as_i64().unwrap_or(0) as i32,
+                text: choice["text"].as_str().unwrap_or("").to_string(),
+                finish_reason: choice["finish_reason"].as_str().unwrap_or("").to_string(),
+                logprobs: None,
             })
             .collect();
-        
+
         let usage_value = &openai_resp["usage"];
         let usage = Usage {
             prompt_tokens: usage_value["prompt_tokens"].as_i64().unwrap_or(0) as i32,
             completion_tokens: usage_value["completion_tokens"].as_i64().unwrap_or(0) as i32,
             total_tokens: usage_value["total_tokens"].as_i64().unwrap_or(0) as i32,
         };
-        
+
         Ok(CompletionResponse {
             id,
             object,
@@ -255,7 +231,7 @@ impl OpenAIProvider {
             usage,
         })
     }
-    
+
     /// 转换为 OpenAI 嵌入请求格式
     fn convert_embedding_request(&self, req: &EmbeddingRequest) -> serde_json::Value {
         let mut request = json!({
@@ -265,57 +241,52 @@ impl OpenAIProvider {
                 EmbeddingInput::Array(arr) => json!(arr),
             },
         });
-        
+
         if let Some(format) = &req.encoding_format {
             request["encoding_format"] = json!(format);
         }
         if let Some(dimensions) = req.dimensions {
             request["dimensions"] = json!(dimensions);
         }
-        
+
         request
     }
-    
+
     /// 转换 OpenAI 嵌入响应为统一格式
-    fn convert_embedding_response(&self, openai_resp: serde_json::Value) -> Result<EmbeddingResponse> {
-        let object = openai_resp["object"]
-            .as_str()
-            .unwrap_or("list")
-            .to_string();
-        
+    fn convert_embedding_response(
+        &self,
+        openai_resp: serde_json::Value,
+    ) -> Result<EmbeddingResponse> {
+        let object = openai_resp["object"].as_str().unwrap_or("list").to_string();
+
         let model = openai_resp["model"]
             .as_str()
             .unwrap_or("unknown")
             .to_string();
-        
+
         let data = openai_resp["data"]
             .as_array()
             .unwrap_or(&vec![])
             .iter()
-            .map(|item| {
-                EmbeddingData {
-                    object: item["object"]
-                        .as_str()
-                        .unwrap_or("embedding")
-                        .to_string(),
-                    embedding: item["embedding"]
-                        .as_array()
-                        .unwrap_or(&vec![])
-                        .iter()
-                        .filter_map(|v| v.as_f64())
-                        .collect(),
-                    index: item["index"].as_i64().unwrap_or(0) as i32,
-                }
+            .map(|item| EmbeddingData {
+                object: item["object"].as_str().unwrap_or("embedding").to_string(),
+                embedding: item["embedding"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter_map(|v| v.as_f64())
+                    .collect(),
+                index: item["index"].as_i64().unwrap_or(0) as i32,
             })
             .collect();
-        
+
         let usage_value = &openai_resp["usage"];
         let usage = Usage {
             prompt_tokens: usage_value["prompt_tokens"].as_i64().unwrap_or(0) as i32,
             completion_tokens: usage_value["completion_tokens"].as_i64().unwrap_or(0) as i32,
             total_tokens: usage_value["total_tokens"].as_i64().unwrap_or(0) as i32,
         };
-        
+
         Ok(EmbeddingResponse {
             object,
             data,
@@ -327,11 +298,15 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl AIProvider for OpenAIProvider {
-    async fn chat_completions(&self, req: &ChatCompletionRequest) -> Result<ChatCompletionResponse> {
+    async fn chat_completions(
+        &self,
+        req: &ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse> {
         let url = format!("{}/chat/completions", self.api_base);
         let request_body = self.convert_request(req);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -339,23 +314,32 @@ impl AIProvider for OpenAIProvider {
             .send()
             .await
             .map_err(|e| Error::ExternalServiceError(format!("Request failed: {}", e)))?;
-        
+
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::ExternalServiceError(format!("OpenAI API error: {}", error_text)));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Error::ExternalServiceError(format!(
+                "OpenAI API error: {}",
+                error_text
+            )));
         }
-        
-        let openai_resp: serde_json::Value = response.json().await
+
+        let openai_resp: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| Error::ExternalServiceError(format!("Failed to parse response: {}", e)))?;
-        
+
         self.convert_response(openai_resp)
     }
-    
+
     async fn completions(&self, req: &CompletionRequest) -> Result<CompletionResponse> {
         let url = format!("{}/completions", self.api_base);
         let request_body = self.convert_completion_request(req);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -363,23 +347,32 @@ impl AIProvider for OpenAIProvider {
             .send()
             .await
             .map_err(|e| Error::ExternalServiceError(format!("Request failed: {}", e)))?;
-        
+
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::ExternalServiceError(format!("OpenAI API error: {}", error_text)));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Error::ExternalServiceError(format!(
+                "OpenAI API error: {}",
+                error_text
+            )));
         }
-        
-        let openai_resp: serde_json::Value = response.json().await
+
+        let openai_resp: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| Error::ExternalServiceError(format!("Failed to parse response: {}", e)))?;
-        
+
         self.convert_completion_response(openai_resp)
     }
-    
+
     async fn embeddings(&self, req: &EmbeddingRequest) -> Result<EmbeddingResponse> {
         let url = format!("{}/embeddings", self.api_base);
         let request_body = self.convert_embedding_request(req);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -387,24 +380,36 @@ impl AIProvider for OpenAIProvider {
             .send()
             .await
             .map_err(|e| Error::ExternalServiceError(format!("Request failed: {}", e)))?;
-        
+
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::ExternalServiceError(format!("OpenAI API error: {}", error_text)));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Error::ExternalServiceError(format!(
+                "OpenAI API error: {}",
+                error_text
+            )));
         }
-        
-        let openai_resp: serde_json::Value = response.json().await
+
+        let openai_resp: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| Error::ExternalServiceError(format!("Failed to parse response: {}", e)))?;
-        
+
         self.convert_embedding_response(openai_resp)
     }
-    
-    async fn chat_stream(&self, req: &ChatCompletionRequest) -> Result<Box<dyn futures::Stream<Item = Result<ChatCompletionChunk>> + Send + Unpin>> {
+
+    async fn chat_stream(
+        &self,
+        req: &ChatCompletionRequest,
+    ) -> Result<Box<dyn futures::Stream<Item = Result<ChatCompletionChunk>> + Send + Unpin>> {
         let url = format!("{}/chat/completions", self.api_base);
         let mut request_body = self.convert_request(req);
         request_body["stream"] = json!(true);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -413,31 +418,38 @@ impl AIProvider for OpenAIProvider {
             .send()
             .await
             .map_err(|e| Error::ExternalServiceError(format!("Request failed: {}", e)))?;
-        
+
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::ExternalServiceError(format!("OpenAI API error: {}", error_text)));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Error::ExternalServiceError(format!(
+                "OpenAI API error: {}",
+                error_text
+            )));
         }
-        
+
         // 简化实现：返回一个空的流（实际实现需要处理 SSE）
         use futures::stream;
         let empty_stream = stream::empty();
         Ok(Box::new(empty_stream))
     }
-    
+
     async fn health_check(&self) -> Result<bool> {
         let url = format!("{}/models", self.api_base);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
             .await
             .map_err(|e| Error::ExternalServiceError(format!("Health check failed: {}", e)))?;
-        
+
         Ok(response.status().is_success())
     }
-    
+
     fn get_model_info(&self) -> ModelInfo {
         ModelInfo {
             provider: "openai".to_string(),

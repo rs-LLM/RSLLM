@@ -34,7 +34,8 @@ use std::collections::HashMap;
 
 // 用途：用户角色设置视图对象
 // 说明：用于返回用户及其角色的关联信息
-#[derive(Clone)]pub struct SetUserVO {
+#[derive(Clone)]
+pub struct SetUserVO {
     // 用途：用户ID
     // 说明：标识要设置角色的用户
     pub id: Option<String>,
@@ -97,11 +98,10 @@ impl RbacUserRoleService {
         // 用途：填充角色权限映射
         // 说明：将权限信息关联到对应的角色
         for x in role_perms {
-            if let Some(v) = perms.get(&x.permission_id.clone().unwrap_or_default()) {
-                if let Some(vec) = role_perms_map.get_mut(x.role_id.as_deref().unwrap_or_default())
-                {
-                    vec.push(v.clone());
-                }
+            if let Some(v) = perms.get(&x.permission_id.clone().unwrap_or_default())
+                && let Some(vec) = role_perms_map.get_mut(x.role_id.as_deref().unwrap_or_default())
+            {
+                vec.push(v.clone());
             }
         }
         // 用途：查询角色详情

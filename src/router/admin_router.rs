@@ -2,13 +2,16 @@
 //! 提供模型和供应商管理的RESTful API路由
 
 use axum::{
-    routing::{delete, get, post, put},
     Router,
+    routing::{delete, get, post, put},
 };
 use std::sync::Arc;
 
 use crate::context::ServiceContext;
-use crate::controller::ai_hub::{model_definition_controller, provider_config_controller, quota_controller, bill_controller};
+use crate::controller::ai_hub::{
+    admin_stats_controller, model_controller, model_provider_mapping_controller,
+    provider_config_controller, quota_controller, user_level_controller,
+};
 
 use crate::middleware::auth_axum::auth;
 use crate::middleware::permission_middleware::require_permission;
@@ -19,56 +22,134 @@ use crate::middleware::permission_middleware::require_permission;
 /// - 模型管理：创建、查询、更新、删除、批量导入
 /// - 供应商管理：创建、查询、更新、删除
 /// - 配额管理：查询、创建、更新、充值、分配
-/// - 账单管理：生成、支付、查询、更新、取消
 pub fn create_admin_router() -> Router<Arc<ServiceContext>> {
-    // 用途：创建配额管理路由组
-    // 说明：配额管理需要manage_quotas权限
+    let provider_management_routes = Router::new()
+        .route(
+            "/admin/providers",
+            post(provider_config_controller::create_provider),
+        )
+        .route(
+            "/admin/providers/{id}",
+            put(provider_config_controller::update_provider),
+        )
+        .route(
+            "/admin/providers/{id}",
+            delete(provider_config_controller::delete_provider),
+        )
+        .layer(axum::middleware::from_fn(require_permission(
+            "sys:provider:edit",
+        )));
+
+    let model_management_routes = Router::new()
+        .route("/admin/models", post(model_controller::create_model))
+        .route("/admin/models/{id}", put(model_controller::update_model))
+        .route("/admin/models/{id}", delete(model_controller::delete_model))
+        .route(
+            "/admin/model-provider-mappings",
+            post(model_provider_mapping_controller::create_model_provider_mapping),
+        )
+        .route(
+            "/admin/model-provider-mappings/{id}",
+            put(model_provider_mapping_controller::update_model_provider_mapping),
+        )
+        .route(
+            "/admin/model-provider-mappings/{id}",
+            delete(model_provider_mapping_controller::delete_model_provider_mapping),
+        )
+        .layer(axum::middleware::from_fn(require_permission(
+            "sys:model:edit",
+        )));
+
+    let view_permission_routes = Router::new()
+        .route(
+            "/admin/providers",
+            get(provider_config_controller::list_providers),
+        )
+        .route(
+            "/admin/providers/{id}",
+            get(provider_config_controller::get_provider),
+        )
+        .route(
+            "/admin/providers/name/{name}",
+            get(provider_config_controller::get_provider_by_name),
+        )
+        .route("/admin/models", get(model_controller::list_models))
+        .route("/admin/models/{id}", get(model_controller::get_model))
+        .route(
+            "/admin/model-provider-mappings",
+            get(model_provider_mapping_controller::list_model_provider_mappings),
+        )
+        .route(
+            "/admin/model-provider-mappings/{id}",
+            get(model_provider_mapping_controller::get_model_provider_mapping),
+        )
+        .route(
+            "/admin/models/{model_id}/provider-mappings",
+            get(model_provider_mapping_controller::get_mappings_by_model),
+        )
+        .route(
+            "/admin/users/levels",
+            get(user_level_controller::get_all_user_levels),
+        )
+        .route(
+            "/admin/users/{id}/level",
+            get(user_level_controller::get_user_level),
+        )
+        .layer(axum::middleware::from_fn(require_permission(
+            "ai:model:view",
+        )));
+
+    let admin_stats_routes = Router::new()
+        .route(
+            "/admin/stats/overview",
+            get(admin_stats_controller::get_overview_stats),
+        )
+        .route(
+            "/admin/stats/trends",
+            get(admin_stats_controller::get_trend_stats),
+        )
+        .route(
+            "/admin/stats/users",
+            get(admin_stats_controller::get_user_stats),
+        )
+        .layer(axum::middleware::from_fn(require_permission(
+            "admin:stats:view",
+        )));
+
+    let admin_stats_refresh_routes = Router::new()
+        .route(
+            "/admin/stats/refresh",
+            post(admin_stats_controller::refresh_stats),
+        )
+        .layer(axum::middleware::from_fn(require_permission(
+            "admin:stats:refresh",
+        )));
+
     let quota_management_routes = Router::new()
-        // 用途：定义配额创建路由
-        // 说明：创建配额（需要manage_quotas权限）
-        .route("/api/v1/admin/quota", post(quota_controller::create_quota))
-        // 用途：定义配额列表路由
-        // 说明：查询配额列表（需要manage_quotas权限）
-        .route("/api/v1/admin/quota", get(quota_controller::list_admin_quotas))
-        // 用途：定义配额更新路由
-        // 说明：更新配额信息（需要manage_quotas权限）
-        .route("/api/v1/admin/quota/{id}", put(quota_controller::update_quota))
-        // 用途：定义配额详情路由
-        // 说明：获取配额详情（需要manage_quotas权限）
-        .route("/api/v1/admin/quota/{id}", get(quota_controller::get_admin_quota))
-        // 用途：定义配额充值路由
-        // 说明：为配额充值（需要manage_quotas权限）
-        .route("/api/v1/admin/quota/{id}/recharge", post(quota_controller::recharge_quota))
-        // 用途：定义配额分配路由
-        // 说明：分配配额（需要manage_quotas权限）
-        .route("/api/v1/admin/quota/allocate", post(quota_controller::allocate_quota))
-        .layer(axum::middleware::from_fn(require_permission("manage_quotas")));
+        .route("/admin/quota", post(quota_controller::create_quota))
+        .route("/admin/quota", get(quota_controller::list_admin_quotas))
+        .route("/admin/quota/{id}", put(quota_controller::update_quota))
+        .route("/admin/quota/{id}", get(quota_controller::get_admin_quota))
+        .layer(axum::middleware::from_fn(require_permission(
+            "manage_quotas",
+        )));
+
+    let user_level_management_routes = Router::new()
+        .route(
+            "/admin/users/{id}/level",
+            put(user_level_controller::update_user_level),
+        )
+        .layer(axum::middleware::from_fn(require_permission(
+            "sys:user:edit",
+        )));
 
     Router::new()
-        // 模型管理路由（仅包含需要认证的操作）
-        .route("/api/v1/admin/models", post(model_definition_controller::create_model))
-        .route("/api/v1/admin/models/key/{key}", get(model_definition_controller::get_model_by_key))
-        .route("/api/v1/admin/models/{id}", put(model_definition_controller::update_model))
-        .route("/api/v1/admin/models/{id}", delete(model_definition_controller::delete_model))
-        .route("/api/v1/admin/models/bulk", post(model_definition_controller::bulk_import_models))
-        
-        // 供应商管理路由
-        .route("/api/v1/admin/providers", post(provider_config_controller::create_provider))
-        .route("/api/v1/admin/providers", get(provider_config_controller::list_providers))
-        .route("/api/v1/admin/providers/{id}", get(provider_config_controller::get_provider))
-        .route("/api/v1/admin/providers/name/{name}", get(provider_config_controller::get_provider_by_name))
-        .route("/api/v1/admin/providers/{id}", put(provider_config_controller::update_provider))
-        .route("/api/v1/admin/providers/{id}", delete(provider_config_controller::delete_provider))
-        
-        // 账单管理路由
-        .route("/api/v1/admin/bills/generate", post(bill_controller::generate_test_billing))
-        .route("/api/v1/admin/bills", get(bill_controller::get_billing_list))
-        .route("/api/v1/admin/bills/{id}", put(bill_controller::update_billing))
-        .route("/api/v1/admin/bills/{id}/pay", post(bill_controller::pay_billing))
-        // 用途：合并配额管理路由
-        // 说明：将需要权限控制的配额管理路由合并到主路由
+        .merge(provider_management_routes)
+        .merge(model_management_routes)
+        .merge(view_permission_routes)
         .merge(quota_management_routes)
-        // 用途：添加认证中间件
-        // 说明：保护管理员路由，确保只有已登录用户可以访问
+        .merge(user_level_management_routes)
+        .merge(admin_stats_routes)
+        .merge(admin_stats_refresh_routes)
         .layer(axum::middleware::from_fn(auth))
 }

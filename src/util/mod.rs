@@ -6,6 +6,10 @@ pub mod bencher;
 // 说明：允许其他模块访问密码加密功能，用于用户密码的加密和验证
 pub mod password_encoder;
 
+// 用途：导出用户注册验证工具模块
+// 说明：允许其他模块访问用户注册验证功能，用于邮箱和密码验证
+pub mod user_register_validation;
+
 // 用途：导出字符串工具模块
 // 说明：允许其他模块访问字符串处理功能，提供字符串的扩展方法
 pub mod string;

@@ -2,7 +2,6 @@
 //! 提供用量统计、性能分析和趋势分析功能
 
 use crate::domain::table::ai_hub::usage_log::AiHubUsageLog;
-use crate::domain::table::ai_hub::billing::AiHubBilling;
 use crate::error::Result;
 use crate::pool;
 use rbatis::rbdc::DateTime;
@@ -32,12 +31,18 @@ impl AnalyticsService {
 
         // 添加时间范围筛选
         if let Some(start) = &start_time {
-            let start_dt = DateTime::from_str(start).map_err(|e| crate::error::Error::from(format!("Invalid start_time: {}", e)))?;
-            map["created_at >="] = rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(start_dt.to_string())));
+            let start_dt = DateTime::from_str(start)
+                .map_err(|e| crate::error::Error::from(format!("Invalid start_time: {}", e)))?;
+            map["created_at >="] = rbs::Value::Ext(
+                "DateTime",
+                Box::new(rbs::Value::String(start_dt.to_string())),
+            );
         }
         if let Some(end) = &end_time {
-            let end_dt = DateTime::from_str(end).map_err(|e| crate::error::Error::from(format!("Invalid end_time: {}", e)))?;
-            map["created_at <="] = rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(end_dt.to_string())));
+            let end_dt = DateTime::from_str(end)
+                .map_err(|e| crate::error::Error::from(format!("Invalid end_time: {}", e)))?;
+            map["created_at <="] =
+                rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(end_dt.to_string())));
         }
 
         // 添加模型筛选
@@ -58,10 +63,12 @@ impl AnalyticsService {
         let total_output_tokens: i64 = logs.iter().map(|l| l.output_tokens).sum();
         let total_tokens: i64 = logs.iter().map(|l| l.total_tokens).sum();
         let total_cost: f64 = logs.iter().map(|l| l.total_cost).sum();
-        let avg_response_time: f64 = logs.iter()
+        let avg_response_time: f64 = logs
+            .iter()
             .filter_map(|l| l.response_time_ms)
             .map(|t| t as f64)
-            .sum::<f64>() / logs.iter().filter(|l| l.response_time_ms.is_some()).count() as f64;
+            .sum::<f64>()
+            / logs.iter().filter(|l| l.response_time_ms.is_some()).count() as f64;
 
         // 按模型分组统计
         let mut by_model = std::collections::HashMap::new();
@@ -77,13 +84,15 @@ impl AnalyticsService {
 
         let model_stats = by_model
             .into_iter()
-            .map(|(model_id, (requests, input_tokens, output_tokens, cost))| ModelStats {
-                model_id: model_id.clone(),
-                requests,
-                input_tokens,
-                output_tokens,
-                cost,
-            })
+            .map(
+                |(model_id, (requests, input_tokens, output_tokens, cost))| ModelStats {
+                    model_id: model_id.clone(),
+                    requests,
+                    input_tokens,
+                    output_tokens,
+                    cost,
+                },
+            )
             .collect();
 
         // 按日期分组统计
@@ -103,13 +112,15 @@ impl AnalyticsService {
 
         let daily_stats = by_date
             .into_iter()
-            .map(|(date, (requests, input_tokens, output_tokens, cost))| DailyStats {
-                date,
-                requests,
-                input_tokens,
-                output_tokens,
-                cost,
-            })
+            .map(
+                |(date, (requests, input_tokens, output_tokens, cost))| DailyStats {
+                    date,
+                    requests,
+                    input_tokens,
+                    output_tokens,
+                    cost,
+                },
+            )
             .collect::<Vec<DailyStats>>()
             .into_iter()
             .rev() // 最新的在前
@@ -141,27 +152,27 @@ impl AnalyticsService {
 
         // 添加时间范围筛选
         if let Some(start) = &start_time {
-            let start_dt = DateTime::from_str(start).map_err(|e| crate::error::Error::from(format!("Invalid start_time: {}", e)))?;
-            map["created_at >="] = rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(start_dt.to_string())));
+            let start_dt = DateTime::from_str(start)
+                .map_err(|e| crate::error::Error::from(format!("Invalid start_time: {}", e)))?;
+            map["created_at >="] = rbs::Value::Ext(
+                "DateTime",
+                Box::new(rbs::Value::String(start_dt.to_string())),
+            );
         }
         if let Some(end) = &end_time {
-            let end_dt = DateTime::from_str(end).map_err(|e| crate::error::Error::from(format!("Invalid end_time: {}", e)))?;
-            map["created_at <="] = rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(end_dt.to_string())));
+            let end_dt = DateTime::from_str(end)
+                .map_err(|e| crate::error::Error::from(format!("Invalid end_time: {}", e)))?;
+            map["created_at <="] =
+                rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(end_dt.to_string())));
         }
 
         // 查询用量记录
         let logs = AiHubUsageLog::select_by_map(pool!(), map).await?;
 
-        // 查询账单记录
-        let bills = AiHubBilling::select_by_map(pool!(), rbs::value! {}).await?;
-
         // 统计数据
         let total_requests = logs.len() as i64;
         let total_tokens: i64 = logs.iter().map(|l| l.total_tokens).sum();
-        let total_revenue: f64 = bills.iter()
-            .filter(|b| b.payment_status == "paid")
-            .map(|b| b.total_amount)
-            .sum();
+        let total_revenue: f64 = logs.iter().map(|l| l.total_cost).sum();
 
         // 按用户分组统计
         let mut user_count = std::collections::HashSet::new();
@@ -178,13 +189,13 @@ impl AnalyticsService {
 
         let top_users = by_user
             .into_iter()
-            .map(|(user_id, (requests, tokens, cost))| UserStats {
+            .map(|(user_id, (requests, tokens, cost))| TopUserStats {
                 user_id: user_id.clone(),
                 requests,
                 tokens,
                 cost,
             })
-            .collect::<Vec<UserStats>>()
+            .collect::<Vec<TopUserStats>>()
             .into_iter()
             .rev() // 按成本降序
             .take(10) // 取前10名
@@ -229,13 +240,10 @@ impl AnalyticsService {
     /// 查询性能趋势分析
     ///
     /// 分析系统性能指标的趋势
-    pub async fn get_performance_trends(
-        &self,
-        _days: i64,
-    ) -> Result<PerformanceTrends> {
+    pub async fn get_performance_trends(&self, _days: i64) -> Result<PerformanceTrends> {
         let now = DateTime::now();
         let start_time = now.clone();
-        
+
         // 构建查询条件：最近N天
         let map = rbs::value! {
             "created_at >=": rbs::Value::Ext("DateTime", Box::new(rbs::Value::String(start_time.to_string())))
@@ -289,10 +297,12 @@ impl AnalyticsService {
         };
 
         // 平均响应时间
-        let avg_response_time = logs.iter()
+        let avg_response_time = logs
+            .iter()
             .filter_map(|l| l.response_time_ms)
             .map(|t| t as f64)
-            .sum::<f64>() / logs.iter().filter(|l| l.response_time_ms.is_some()).count() as f64;
+            .sum::<f64>()
+            / logs.iter().filter(|l| l.response_time_ms.is_some()).count() as f64;
 
         Ok(PerformanceTrends {
             success_rate,
@@ -343,13 +353,13 @@ pub struct SystemStats {
     pub total_tokens: i64,
     pub total_revenue: f64,
     pub active_users: i64,
-    pub top_users: Vec<UserStats>,
+    pub top_users: Vec<TopUserStats>,
     pub top_models: Vec<ModelStats>,
 }
 
-/// 用户统计
+/// 热门用户统计
 #[derive(Clone, Debug)]
-pub struct UserStats {
+pub struct TopUserStats {
     pub user_id: String,
     pub requests: i64,
     pub tokens: i64,

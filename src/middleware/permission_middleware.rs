@@ -11,18 +11,26 @@ use crate::middleware::auth::checked_token;
 
 const TOKEN_KEY: &str = "Authorization";
 
-pub fn require_permission(required_permission: &'static str) -> impl Fn(Request, Next) -> futures::future::BoxFuture<'static, Result<Response, Response>> + Clone + Send + Sync + 'static {
+pub fn require_permission(
+    required_permission: &'static str,
+) -> impl Fn(Request, Next) -> futures::future::BoxFuture<'static, Result<Response, Response>>
++ Clone
++ Send
++ Sync
++ 'static {
     move |request: Request, next: Next| {
         let permission = required_permission;
         Box::pin(async move {
-            if let Ok(token) = get_token(&request.headers()) {
-                if let Some(jwt_token) = token_is_valid(&token) {
-                    if has_permission(&jwt_token, permission) {
-                        let response = next.run(request).await;
-                        return Ok(response);
-                    } else {
-                        return Err(create_permission_error("权限不足，需要".to_string() + permission + "权限"));
-                    }
+            if let Ok(token) = get_token(request.headers())
+                && let Some(jwt_token) = token_is_valid(token)
+            {
+                if has_permission(&jwt_token, permission) {
+                    let response = next.run(request).await;
+                    return Ok(response);
+                } else {
+                    return Err(create_permission_error(
+                        "权限不足，需要".to_string() + permission + "权限",
+                    ));
                 }
             }
             Err(create_permission_error("无效的访问令牌".to_string()))
@@ -31,14 +39,18 @@ pub fn require_permission(required_permission: &'static str) -> impl Fn(Request,
 }
 
 fn has_permission(token: &JWTToken, required_permission: &str) -> bool {
-    token.permissions.contains(&required_permission.to_string())
+    log::debug!(
+        "检查权限: 需要权限={}, 用户权限列表={:?}",
+        required_permission,
+        token.permissions
+    );
+    let result = token.permissions.contains(&required_permission.to_string());
+    log::debug!("权限检查结果: {}", result);
+    result
 }
 
 fn token_is_valid(token: &str) -> Option<JWTToken> {
-    match checked_token(token) {
-        Ok(data) => Some(data),
-        Err(_) => None,
-    }
+    checked_token(token).ok()
 }
 
 fn get_token(h: &HeaderMap) -> Result<&str, Error> {

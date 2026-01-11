@@ -3,10 +3,10 @@
 use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // 用途：导入rbatis的CRUD宏
 // 说明：用于自动生成增删改查操作
-use rbatis::{crud};
+use rbatis::crud;
 
 // 用途：交易类型枚举
 // 说明：定义交易的不同类型
@@ -28,7 +28,7 @@ pub enum TransactionType {
 
 // 用途：交易表结构体
 // 说明：记录用户余额的所有变更历史，支持账单查询和审计
-// 注意：字段名使用驼峰命名以匹配数据库表结构
+// 注意：Rust字段使用snake_case命名，通过serde rename映射到数据库的camelCase字段
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Transaction {
     // 用途：交易ID
@@ -36,7 +36,8 @@ pub struct Transaction {
     pub id: Option<String>,
     // 用途：用户ID
     // 说明：交易所属用户的唯一标识符
-    pub userId: String,
+    #[serde(rename = "userId")]
+    pub user_id: String,
     // 用途：交易类型
     // 说明：交易类型，包括充值、扣减、设置
     #[serde(rename = "type")]
@@ -46,19 +47,23 @@ pub struct Transaction {
     pub amount: f64,
     // 用途：交易前余额
     // 说明：交易执行前的用户余额
-    pub balanceBefore: f64,
+    #[serde(rename = "balanceBefore")]
+    pub balance_before: f64,
     // 用途：交易后余额
     // 说明：交易执行后的用户余额
-    pub balanceAfter: f64,
+    #[serde(rename = "balanceAfter")]
+    pub balance_after: f64,
     // 用途：操作人ID
     // 说明：执行交易操作的用户ID，系统自动操作时为空
-    pub operatorId: Option<String>,
+    #[serde(rename = "operatorId")]
+    pub operator_id: Option<String>,
     // 用途：原因
     // 说明：交易的原因或备注
     pub reason: String,
     // 用途：创建时间
     // 说明：交易记录的创建时间
-    pub createdAt: Option<DateTime>,
+    #[serde(rename = "createdAt")]
+    pub created_at: Option<DateTime>,
 }
 
 // 用途：生成Transaction的CRUD操作宏

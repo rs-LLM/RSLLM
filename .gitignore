@@ -36,3 +36,9 @@ Cargo.lock
 /tests
 
 /rsllm.log
+
+/specs
+
+rsllm.db**
+
+src/bin

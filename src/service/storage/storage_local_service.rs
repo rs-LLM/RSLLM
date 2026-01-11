@@ -28,7 +28,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 // 用途：本地文件存储服务结构体
 // 说明：使用本地文件系统进行文件存储，提供简单的文件操作功能
-pub struct FileLocalService {
+pub struct FileLocalService {}
+
+impl Default for FileLocalService {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FileLocalService {
@@ -51,7 +56,7 @@ impl IStorageService for FileLocalService {
         // 用途：将字符串路径转换为PathBuf
         // 说明：方便进行路径操作和文件IO
         let name = PathBuf::from(name);
-        
+
         // 用途：获取文件的父目录
         // 说明：确保父目录存在，避免文件创建失败
         if let Some(parent) = name.parent() {
@@ -59,19 +64,19 @@ impl IStorageService for FileLocalService {
             // 说明：如果父目录不存在，创建所有必要的父目录
             tokio::fs::create_dir_all(&parent).await?;
         }
-        
+
         // 用途：创建或覆盖文件
         // 说明：准备写入文件数据
         let mut f = tokio::fs::File::create(&name).await?;
-        
+
         // 用途：将数据写入文件
         // 说明：保存文件内容到本地文件系统
-        f.write(&data).await?;
-        
+        f.write_all(&data).await?;
+
         // 用途：刷新文件缓冲区
         // 说明：确保所有数据都写入磁盘，避免数据丢失
         f.flush().await?;
-        
+
         // 用途：返回文件路径
         // 说明：返回成功上传的文件路径，方便后续访问
         Ok(name.to_str().unwrap_or_default().to_string())
@@ -83,7 +88,7 @@ impl IStorageService for FileLocalService {
         // 用途：将字符串路径转换为PathBuf
         // 说明：方便进行路径操作和文件IO
         let name = PathBuf::from(name);
-        
+
         // 用途：获取文件的父目录
         // 说明：虽然下载时父目录应该存在，但仍进行检查以确保鲁棒性
         if let Some(parent) = name.parent() {
@@ -91,19 +96,19 @@ impl IStorageService for FileLocalService {
             // 说明：确保父目录存在，避免文件读取失败
             tokio::fs::create_dir_all(&parent).await?;
         }
-        
+
         // 用途：打开文件
         // 说明：准备读取文件数据
         let mut f = tokio::fs::File::open(&name).await?;
-        
+
         // 用途：创建数据缓冲区
         // 说明：用于存储读取的文件数据
         let mut data = Vec::new();
-        
+
         // 用途：读取文件所有内容
         // 说明：将文件数据完整读取到缓冲区
         f.read_to_end(&mut data).await?;
-        
+
         // 用途：返回文件数据
         // 说明：返回成功读取的文件数据
         Ok(data)
@@ -115,15 +120,15 @@ impl IStorageService for FileLocalService {
         // 用途：将字符串路径转换为PathBuf
         // 说明：方便进行目录操作
         let name = PathBuf::from(name);
-        
+
         // 用途：打开目录读取器
         // 说明：用于遍历目录中的文件和子目录
         let mut rd = tokio::fs::read_dir(&name).await?;
-        
+
         // 用途：创建结果列表
         // 说明：用于存储目录中的文件路径
         let mut result = Vec::new();
-        
+
         // 用途：遍历目录条目
         // 说明：逐个获取目录中的文件和子目录
         while let Ok(v) = rd.next_entry().await {
@@ -139,7 +144,7 @@ impl IStorageService for FileLocalService {
                 break;
             }
         }
-        
+
         // 用途：返回目录中的文件列表
         // 说明：返回成功获取的文件路径列表
         Ok(result)
@@ -151,11 +156,11 @@ impl IStorageService for FileLocalService {
         // 用途：将字符串路径转换为PathBuf
         // 说明：方便进行文件操作
         let name = PathBuf::from(name);
-        
+
         // 用途：删除文件
         // 说明：从本地文件系统中删除指定文件
         let f = tokio::fs::remove_file(&name).await?;
-        
+
         // 用途：返回操作结果
         // 说明：返回成功删除的结果
         Ok(f)

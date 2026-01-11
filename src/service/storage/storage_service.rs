@@ -72,7 +72,7 @@ impl StorageService {
             return Ok(Self {
                 inner: Arc::new(Box::new(FileLocalService::new())),
             });
-        } 
+        }
         // 用途：判断是否使用S3存储
         // 说明：根据配置选择S3存储实现
         else if storage.starts_with("s3://") {

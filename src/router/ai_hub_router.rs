@@ -3,25 +3,36 @@
 //! 提供OpenAI兼容的API路由配置
 
 use axum::{
-    routing::post,
-    Router,
+    Router, middleware,
+    routing::{get, post},
 };
 
 use std::sync::Arc;
 
 // 导入控制器
-use crate::controller::ai_hub::{chat_controller, completion_controller, embedding_controller};
 use crate::context::ServiceContext;
+use crate::controller::ai_hub::{
+    chat_controller, embedding_controller, model_controller, responses_controller,
+};
+use crate::middleware::quota_check_middleware::quota_check_middleware;
 
 /// 创建AI Hub路由器
 ///
 /// 提供OpenAI兼容的API端点：
-/// - POST /v1/chat/completions - 聊天补全
-/// - POST /v1/completions - 文本补全
-/// - POST /v1/embeddings - 嵌入生成
-pub fn create_ai_hub_router() -> Router<Arc<ServiceContext>> {
+/// - GET /api/v1/models - 模型列表
+/// - POST /api/v1/chat/completions - 聊天补全（支持流式和非流式）
+/// - POST /api/v1/embeddings - 嵌入生成
+/// - POST /api/v1/responses - Responses API
+///
+/// 所有端点都需要通过API密钥认证
+pub fn create_ai_hub_router(state: Arc<ServiceContext>) -> Router<Arc<ServiceContext>> {
     Router::new()
-        .route("/v1/chat/completions", post(chat_controller::chat_completions))
-        .route("/v1/completions", post(completion_controller::completions))
-        .route("/v1/embeddings", post(embedding_controller::embeddings))
+        .route("/models", get(model_controller::list_openai_models))
+        .route("/chat/completions", post(chat_controller::chat_completions))
+        .route("/embeddings", post(embedding_controller::embeddings))
+        .route("/responses", post(responses_controller::create_response))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            quota_check_middleware,
+        ))
 }

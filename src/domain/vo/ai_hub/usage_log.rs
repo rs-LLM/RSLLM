@@ -9,42 +9,25 @@ use utoipa::ToSchema;
 // 说明：用于API响应的用量记录数据
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct AiHubUsageLogVO {
-    // 用途：记录ID
-    pub id: Option<String>,
-    // 用途：请求ID
-    pub request_id: Option<String>,
-    // 用途：用户ID
-    pub user_id: Option<String>,
-    // 用途：模型ID
-    pub model_id: Option<String>,
-    // 用途：提供商ID
-    pub provider_id: Option<String>,
-    // 用途：输入token数量
-    pub input_tokens: Option<i64>,
-    // 用途：输出token数量
-    pub output_tokens: Option<i64>,
-    // 用途：总token数量
-    pub total_tokens: Option<i64>,
-    // 用途：输入费用（分）
-    pub input_cost: Option<f64>,
-    // 用途：输出费用（分）
-    pub output_cost: Option<f64>,
-    // 用途：总费用（分）
-    pub total_cost: Option<f64>,
-    // 用途：请求时间
-    pub request_time: Option<String>,
-    // 用途：响应时间
-    pub response_time: Option<String>,
-    // 用途：处理时长（毫秒）
-    pub duration_ms: Option<i64>,
-    // 用途：请求类型
+    pub id: String,
+    pub user_id: String,
+    pub api_key: String,
+    pub model_id: String,
+    pub provider_id: String,
     pub request_type: String,
-    // 用途：状态
-    pub status: String,
-    // 用途：扩展字段
-    pub extra: Option<serde_json::Value>,
-    // 用途：创建时间
-    pub created_at: Option<String>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    pub input_cost: f64,
+    pub output_cost: f64,
+    pub total_cost: f64,
+    pub input_price: f64,
+    pub output_price: f64,
+    pub status_code: i32,
+    pub error_message: Option<String>,
+    pub request_time: i64,
+    pub response_time: i64,
+    pub created_at: String,
 }
 
 // 用途：用量统计VO结构体
@@ -89,4 +72,22 @@ pub struct CostDetailVO {
     pub total_tokens: i64,
     // 用途：请求次数
     pub request_count: i64,
+}
+
+// 用途：用量趋势VO结构体
+// 说明：用于展示按时间维度的用量趋势数据
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct UsageTrendVO {
+    // 用途：日期
+    pub date: Option<String>,
+    // 用途：总token
+    pub total_tokens: Option<i64>,
+    // 用途：输入token
+    pub input_tokens: Option<i64>,
+    // 用途：输出token
+    pub output_tokens: Option<i64>,
+    // 用途：总费用（分）
+    pub total_cost: Option<f64>,
+    // 用途：请求次数
+    pub request_count: Option<i64>,
 }

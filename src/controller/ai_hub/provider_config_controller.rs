@@ -2,9 +2,8 @@
 //! 提供供应商管理的RESTful API接口
 
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
     Json,
+    extract::{Path, Query, State},
 };
 use std::sync::Arc;
 
@@ -20,7 +19,7 @@ use crate::service::ai_hub::{
 /// 创建新的供应商配置
 #[utoipa::path(
     post,
-    path = "/api/v1/admin/providers",
+    path = "/admin/providers",
     request_body = CreateProviderRequest,
     responses(
         (status = 200, description = "创建成功", body = ApiResponse<crate::domain::table::ai_hub::provider_config::ProviderConfig>),
@@ -37,7 +36,7 @@ pub async fn create_provider(
     let service = service_guard.as_ref().ok_or_else(|| {
         Error::BusinessError("Provider config service not initialized".to_string())
     })?;
-    
+
     let provider = service.create_provider(req).await?;
     Ok(Json(ApiResponse::success(provider)))
 }
@@ -47,7 +46,7 @@ pub async fn create_provider(
 /// 根据ID获取供应商配置详情
 #[utoipa::path(
     get,
-    path = "/api/v1/admin/providers/{id}",
+    path = "/admin/providers/{id}",
     params(
         ("id" = String, Path, description = "供应商ID")
     ),
@@ -66,7 +65,7 @@ pub async fn get_provider(
     let service = service_guard.as_ref().ok_or_else(|| {
         Error::BusinessError("Provider config service not initialized".to_string())
     })?;
-    
+
     let provider = service.get_provider(&id).await?;
     Ok(Json(ApiResponse::success(provider)))
 }
@@ -76,7 +75,7 @@ pub async fn get_provider(
 /// 根据名称获取供应商配置详情
 #[utoipa::path(
     get,
-    path = "/api/v1/admin/providers/name/{name}",
+    path = "/admin/providers/name/{name}",
     params(
         ("name" = String, Path, description = "供应商名称")
     ),
@@ -95,7 +94,7 @@ pub async fn get_provider_by_name(
     let service = service_guard.as_ref().ok_or_else(|| {
         Error::BusinessError("Provider config service not initialized".to_string())
     })?;
-    
+
     let provider = service.get_provider_by_name(&name).await?;
     Ok(Json(ApiResponse::success(provider)))
 }
@@ -105,7 +104,7 @@ pub async fn get_provider_by_name(
 /// 分页查询供应商列表
 #[utoipa::path(
     get,
-    path = "/api/v1/admin/providers",
+    path = "/admin/providers",
     params(
         ("page" = i64, Query, description = "页码"),
         ("size" = i64, Query, description = "每页数量"),
@@ -127,7 +126,7 @@ pub async fn list_providers(
     let service = service_guard.as_ref().ok_or_else(|| {
         Error::BusinessError("Provider config service not initialized".to_string())
     })?;
-    
+
     let response = service.list_providers(req).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -137,7 +136,7 @@ pub async fn list_providers(
 /// 更新供应商配置
 #[utoipa::path(
     put,
-    path = "/api/v1/admin/providers/{id}",
+    path = "/admin/providers/{id}",
     params(
         ("id" = String, Path, description = "供应商ID")
     ),
@@ -159,7 +158,7 @@ pub async fn update_provider(
     let service = service_guard.as_ref().ok_or_else(|| {
         Error::BusinessError("Provider config service not initialized".to_string())
     })?;
-    
+
     let provider = service.update_provider(&id, req).await?;
     Ok(Json(ApiResponse::success(provider)))
 }
@@ -169,26 +168,26 @@ pub async fn update_provider(
 /// 删除指定的供应商配置
 #[utoipa::path(
     delete,
-    path = "/api/v1/admin/providers/{id}",
+    path = "/admin/providers/{id}",
     params(
         ("id" = String, Path, description = "供应商ID")
     ),
     responses(
-        (status = 204, description = "删除成功"),
-        (status = 404, description = "供应商不存在"),
-        (status = 500, description = "服务器错误")
+        (status = 200, description = "删除成功", body = ApiResponse<String>),
+        (status = 404, description = "供应商不存在", body = ApiResponse<String>),
+        (status = 500, description = "服务器错误", body = ApiResponse<String>)
     ),
     tag = "providers"
 )]
 pub async fn delete_provider(
     State(ctx): State<Arc<ServiceContext>>,
     Path(id): Path<String>,
-) -> Result<StatusCode> {
+) -> Result<Json<ApiResponse<String>>> {
     let service_guard = ctx.provider_config_service.read().await;
     let service = service_guard.as_ref().ok_or_else(|| {
         Error::BusinessError("Provider config service not initialized".to_string())
     })?;
-    
+
     service.delete_provider(&id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(ApiResponse::success("删除成功".to_string())))
 }

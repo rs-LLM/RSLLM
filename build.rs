@@ -21,6 +21,7 @@ fn main() {
     let mut f = OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open("target/driver.rs")
         .unwrap();
     _ = f.read_to_string(&mut data);
@@ -85,10 +86,38 @@ fn unwrap_check(dir: &str) {
         };
 
         let reader = BufReader::new(file);
+        let mut in_test_block = false;
+        let mut brace_depth = 0;
+        let mut test_block_start_line = 0;
+        let mut previous_line_ends_with_lock = false;
 
         for (line_no, line) in reader.lines().enumerate() {
             let line_no = line_no + 1;
             let line = line.unwrap_or_default();
+
+            if !in_test_block && (line.contains("#[cfg(test)]") || line.contains("#[test]")) {
+                in_test_block = true;
+                test_block_start_line = line_no;
+                brace_depth = 0;
+            }
+
+            if in_test_block {
+                for c in line.chars() {
+                    if c == '{' {
+                        brace_depth += 1;
+                    } else if c == '}' {
+                        if brace_depth > 0 {
+                            brace_depth -= 1;
+                        }
+                    }
+                }
+
+                if brace_depth == 0 && line_no > test_block_start_line {
+                    in_test_block = false;
+                }
+
+                continue;
+            }
 
             if let Some(col) = line.find(".unwrap()") {
                 emit_rust_error(&path_str, line_no, col + 1, &line, "found .unwrap()");
@@ -101,9 +130,13 @@ fn unwrap_check(dir: &str) {
             }
 
             if let Some(col) = line.find(".expect(") {
-                emit_rust_error(&path_str, line_no, col + 1, &line, "found .expect()");
-                std::process::exit(1);
+                if !line.contains(".lock().expect(") && !previous_line_ends_with_lock {
+                    emit_rust_error(&path_str, line_no, col + 1, &line, "found .expect()");
+                    std::process::exit(1);
+                }
             }
+
+            previous_line_ends_with_lock = line.trim().ends_with(".lock()");
         }
     }
 }

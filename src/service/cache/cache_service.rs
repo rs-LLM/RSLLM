@@ -1,6 +1,6 @@
 // 用途：导入应用程序配置结构体
 // 说明：用于获取缓存配置
-use crate::config::config::ApplicationConfig;
+use crate::config::application::ApplicationConfig;
 
 // 用途：导入自定义错误类型和结果类型
 // 说明：用于统一错误处理

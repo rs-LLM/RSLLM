@@ -69,14 +69,14 @@ pub struct SystemStatsVO {
     /// 活跃用户数
     pub active_users: i64,
     /// 热门用户
-    pub top_users: Vec<UserStatsVO>,
+    pub top_users: Vec<TopUserStatsVO>,
     /// 热门模型
     pub top_models: Vec<ModelStatsVO>,
 }
 
-/// 用户统计VO
+/// 热门用户统计VO
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-pub struct UserStatsVO {
+pub struct TopUserStatsVO {
     /// 用户ID
     pub user_id: String,
     /// 请求数

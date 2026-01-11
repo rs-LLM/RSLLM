@@ -1,6 +1,6 @@
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // 用途：导入ToSchema trait
 // 说明：用于OpenAPI文档生成
 use utoipa::ToSchema;

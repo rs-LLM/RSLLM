@@ -6,6 +6,10 @@ pub mod auth;
 // 说明：允许其他模块访问登录相关的DTO
 pub mod sign_in;
 
+// 用途：导出注册相关DTO模块
+// 说明：允许其他模块访问注册相关的DTO
+pub mod register;
+
 // 用途：导出刷新令牌相关DTO模块
 // 说明：允许其他模块访问刷新令牌相关的DTO
 pub mod refresh_token;

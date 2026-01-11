@@ -2,23 +2,19 @@
 //!
 //! 提供OpenAI兼容的嵌入生成API接口
 
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    Json,
-    response::IntoResponse,
-};
+use axum::{Json, extract::State, http::HeaderMap, response::IntoResponse};
 use std::sync::Arc;
-use uuid::Uuid;
+use ulid::Ulid;
 
 // 导入相关类型
 use crate::context::ServiceContext;
 use crate::domain::dto::embeddings::EmbeddingsRequest;
-use crate::domain::vo::response::ApiResponse;
-use crate::service::{TokenCounter, Content};
-use crate::domain::vo::embeddings::{EmbeddingsResponse, Embeddings, Embedding};
-use crate::domain::vo::usage::EmbeddingUsage;
 use crate::domain::dto::validation::Validator;
+use crate::domain::vo::embeddings::{Embedding, Embeddings, EmbeddingsResponse};
+use crate::domain::vo::response::ApiResponse;
+use crate::domain::vo::usage::EmbeddingUsage;
+use crate::service::ai_hub::rate_limit_service::RateLimitCheckResult;
+use crate::service::{Content, TokenCounter};
 
 /// 嵌入生成接口
 ///
@@ -44,18 +40,18 @@ pub async fn embeddings(
     State(state): State<Arc<ServiceContext>>,
     Json(req): Json<EmbeddingsRequest>,
 ) -> impl IntoResponse {
-    let request_id = Uuid::new_v4().to_string();
+    let request_id = Ulid::new().to_string();
     let start_time = std::time::Instant::now();
-    
+
     log::info!("[AI Hub] Embeddings request: {}", request_id);
-    
+
     // 1. 用户认证
-    let user_id = match authenticate_user(&headers, &state) {
-        Ok(id) => id,
+    let (user_id, api_key) = match authenticate_user(&headers, &state).await {
+        Ok((id, key)) => (id, key),
         Err(e) => return Json(ApiResponse::error("401", &e.to_string())),
     };
     log::info!("[AI Hub] User authenticated: {}", user_id);
-    
+
     // 2. 输入验证
     match Validator::validate_embeddings_request(&req.model, &req.input) {
         Ok(_) => log::info!("[AI Hub] Input validation passed"),
@@ -64,143 +60,329 @@ pub async fn embeddings(
             return Json(ApiResponse::error("400", &format!("输入验证失败: {}", e)));
         }
     }
-    
+
     // 3. Token计算
-    let (input_tokens, input_text_count) = match calculate_tokens(&req) {
+    let (input_tokens, input_text_count) = match calculate_tokens(&req, &state.model_router).await {
         Ok(result) => result,
         Err(e) => return Json(ApiResponse::error("500", &e.to_string())),
     };
-    log::info!("[AI Hub] Token calculation: input={}, model={}",
-        input_tokens, req.model);
-    
+    log::info!(
+        "[AI Hub] Token calculation: input={}, model={}",
+        input_tokens,
+        req.model
+    );
+
+    // 3.5. 检查速率限制（使用实际的token数量）
+    let input_tokens_i32 = input_tokens as i32;
+    let rate_limit_result = state
+        .rate_limit_service
+        .check_quota_with_tokens(&user_id, input_tokens_i32)
+        .await;
+    match rate_limit_result {
+        Ok(RateLimitCheckResult {
+            allowed: true,
+            rpm_remaining,
+            tpm_remaining,
+            ..
+        }) => {
+            log::info!(
+                "[AI Hub] Rate limit check passed: RPM remaining={}, TPM remaining={}",
+                rpm_remaining,
+                tpm_remaining
+            );
+        }
+        Ok(RateLimitCheckResult {
+            allowed: false,
+            rpm_remaining,
+            tpm_remaining,
+            warning,
+        }) => {
+            let error_msg = if let Some(w) = warning {
+                format!(
+                    "Rate limit exceeded: {}. RPM remaining: {}, TPM remaining: {}",
+                    w, rpm_remaining, tpm_remaining
+                )
+            } else {
+                format!(
+                    "Rate limit exceeded. RPM remaining: {}, TPM remaining: {}",
+                    rpm_remaining, tpm_remaining
+                )
+            };
+            log::warn!("[AI Hub] {}", error_msg);
+            return Json(ApiResponse::error("429", &error_msg));
+        }
+        Err(e) => {
+            log::error!("[AI Hub] Rate limit check failed: {}", e);
+            return Json(ApiResponse::error(
+                "500",
+                &format!("Rate limit check failed: {}", e),
+            ));
+        }
+    }
+
     // 4. 预消费和配额检查
     let billing_service = &state.billing_service;
-    let (base_input_price, base_output_price) = get_pricing(&req.model);
-    
+    let (base_input_price, base_output_price) = get_pricing(&req.model, &state.model_router).await;
+
     // 嵌入通常没有输出token，但为了统一处理，设置为0
-    let fee = match billing_service.calculate_and_check(
-        &user_id,
-        &req.model,
-        "unknown",
-        input_tokens,
-        0, // 嵌入没有输出token
-        base_input_price,
-        base_output_price,
-        "embeddings",
-    ).await {
+    let fee = match billing_service
+        .calculate_and_check(&crate::service::ai_hub::CalculateAndCheckParams {
+            user_id: &user_id,
+            model_id: &req.model,
+            api_key: &api_key,
+            input_tokens,
+            output_tokens: 0,
+            base_input_price,
+            base_output_price,
+            request_type: "embeddings",
+        })
+        .await
+    {
         Ok(fee) => fee,
         Err(e) => return Json(ApiResponse::error("400", &e.to_string())),
     };
-    
-    log::info!("[AI Hub] Pre-consumption check passed: cost={:.2}", fee.total_cost);
-    
-    // 5. 调用AI服务（简化实现，返回成功响应）
-    let response = create_mock_response(&req, input_text_count);
-    
+
+    log::info!(
+        "[AI Hub] Pre-consumption check passed: cost={:.2}",
+        fee.total_cost
+    );
+
+    // 5. 调用AI服务
+    let response = match call_provider(&state, &req, &user_id).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            // 调用失败，回滚预消费
+            log::error!(
+                "[AI Hub] Provider call failed, rolling back pre-consumption: {}",
+                e
+            );
+            if let Err(rollback_err) = billing_service.rollback_pre_consumption(&fee).await {
+                log::error!(
+                    "[AI Hub] Failed to rollback pre-consumption: {}",
+                    rollback_err
+                );
+            }
+            return Json(ApiResponse::error(
+                "500",
+                &format!("AI service call failed: {}", e),
+            ));
+        }
+    };
+
     // 6. 实际扣费和记录用量
     let duration_ms = start_time.elapsed().as_millis() as i64;
-    let usage_log_id = match billing_service.deduct_quota_and_log(
-        &fee,
-        &request_id,
-        duration_ms,
-        "success",
-        Some(serde_json::json!({
-            "model": req.model,
-            "input_count": input_text_count,
-        })),
-    ).await {
+    let usage_log_id = match billing_service
+        .deduct_quota_and_log(
+            &fee,
+            &api_key,
+            duration_ms,
+            "success",
+            Some(serde_json::json!({
+                "model": req.model,
+                "input_count": input_text_count,
+            })),
+        )
+        .await
+    {
         Ok(id) => id,
-        Err(e) => return Json(ApiResponse::error("500", &format!("Failed to deduct quota and log: {}", e))),
+        Err(e) => {
+            return Json(ApiResponse::error(
+                "500",
+                &format!("Failed to deduct quota and log: {}", e),
+            ));
+        }
     };
-    
+
     log::info!("[AI Hub] Usage logged: {}", usage_log_id);
-    
+
     // 7. 返回响应
     Json(ApiResponse::success(response))
 }
 
 /// 用户认证
-fn authenticate_user(headers: &HeaderMap, _state: &Arc<ServiceContext>) -> std::result::Result<String, String> {
+async fn authenticate_user(
+    headers: &HeaderMap,
+    state: &Arc<ServiceContext>,
+) -> std::result::Result<(String, String), String> {
     let token = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
         .ok_or_else(|| "Missing or invalid authorization header".to_string())?;
-    
-    let jwt_token = crate::middleware::auth::checked_token(token)
-        .map_err(|e| e.to_string())?;
-    Ok(jwt_token.id)
+
+    let validation_result = state
+        .api_key_service
+        .validate_api_key(token)
+        .await
+        .map_err(|e| format!("API key validation failed: {}", e))?;
+
+    if !validation_result.valid {
+        return Err(validation_result
+            .error
+            .unwrap_or_else(|| "Invalid API key".to_string()));
+    }
+
+    let user_id = validation_result
+        .user_id
+        .ok_or_else(|| "User ID not found".to_string())?;
+
+    Ok((user_id, token.to_string()))
 }
 
 /// 计算token数量
-fn calculate_tokens(req: &EmbeddingsRequest) -> std::result::Result<(i64, usize), String> {
+async fn calculate_tokens(
+    req: &EmbeddingsRequest,
+    model_router: &crate::routers::model_router::ModelRouter,
+) -> std::result::Result<(i64, usize), String> {
     let mut total_tokens = 0;
-    let input_count;
-    
-    match &req.input {
+
+    let model_def = match model_router.route_to_model(&req.model).await {
+        Ok(def) => def,
+        Err(e) => {
+            log::warn!(
+                "[AI Hub] Failed to get model definition for {}: {}",
+                req.model,
+                e
+            );
+            return Err(format!("Model not found: {}", req.model));
+        }
+    };
+
+    let input_count = match &req.input {
         crate::domain::dto::embeddings::EmbeddingsInput::Single(text) => {
             let content = Content::Text(text.clone());
-            let meta = TokenCounter::count_content_tokens(&content, &req.model, false)
-                .map_err(|e| e.to_string())?;
+            let meta =
+                TokenCounter::count_content_tokens(&content, &req.model, false, Some(&model_def))
+                    .map_err(|e| e.to_string())?;
             total_tokens += meta.input_tokens;
-            input_count = 1;
+            1
         }
         crate::domain::dto::embeddings::EmbeddingsInput::Multiple(texts) => {
             for text in texts {
                 let content = Content::Text(text.clone());
-                let meta = TokenCounter::count_content_tokens(&content, &req.model, false)
-                    .map_err(|e| e.to_string())?;
+                let meta = TokenCounter::count_content_tokens(
+                    &content,
+                    &req.model,
+                    false,
+                    Some(&model_def),
+                )
+                .map_err(|e| e.to_string())?;
                 total_tokens += meta.input_tokens;
             }
-            input_count = texts.len();
+            texts.len()
         }
         crate::domain::dto::embeddings::EmbeddingsInput::SingleTokenIds(token_ids) => {
-            // Token ID数组，每个ID算作1个token
             total_tokens += token_ids.len() as i64;
-            input_count = 1;
+            1
         }
         crate::domain::dto::embeddings::EmbeddingsInput::MultipleTokenIds(token_ids_list) => {
             for token_ids in token_ids_list {
                 total_tokens += token_ids.len() as i64;
             }
-            input_count = token_ids_list.len();
+            token_ids_list.len()
         }
-    }
-    
+    };
+
     Ok((total_tokens, input_count))
 }
 
 /// 获取模型定价
-fn get_pricing(model: &str) -> (f64, f64) {
-    if model.contains("text-embedding-ada-002") {
-        (0.0001, 0.0) // $0.0001/1K tokens, no output cost
-    } else if model.contains("text-embedding-3-small") {
-        (0.00002, 0.0) // $0.00002/1K tokens
-    } else if model.contains("text-embedding-3-large") {
-        (0.00013, 0.0) // $0.00013/1K tokens
-    } else {
-        (0.0001, 0.0) // 默认定价
+async fn get_pricing(
+    model: &str,
+    model_router: &crate::routers::model_router::ModelRouter,
+) -> (f64, f64) {
+    match model_router.route_to_model(model).await {
+        Ok(model_info) => {
+            let input_price = model_info.model_base.input_price;
+            let output_price = model_info.model_base.output_price;
+            (input_price, output_price)
+        }
+        Err(e) => {
+            log::warn!(
+                "[AI Hub] Failed to get model definition for {}: {}, using default pricing",
+                model,
+                e
+            );
+            // 默认定价
+            (0.0001, 0.0)
+        }
     }
 }
 
-/// 创建模拟响应（用于测试）
-fn create_mock_response(req: &EmbeddingsRequest, input_count: usize) -> EmbeddingsResponse {
-    // 生成模拟的嵌入向量（简化处理）
-    let mock_embedding = vec![0.1_f32; 1536]; // 假设1536维
-    
-    let data = (0..input_count).map(|i| Embeddings {
-        object: "embedding".to_string(),
-        embedding: Embedding::Float(mock_embedding.clone()),
-        index: i,
-    }).collect();
-    
-    EmbeddingsResponse {
-        object: "list".to_string(),
-        data,
+/// 调用AI Provider获取真实响应
+async fn call_provider(
+    state: &Arc<ServiceContext>,
+    req: &EmbeddingsRequest,
+    _user_id: &str,
+) -> std::result::Result<EmbeddingsResponse, String> {
+    // 1. 使用ModelRouter解析模型标识符并路由到对应的provider和model
+    let model_router = &state.model_router;
+
+    // 解析模型标识符格式: "provider_code/model_code"
+    let (provider_config, model_info) = model_router
+        .route(&req.model, true)
+        .await
+        .map_err(|e| format!("Failed to route model: {}", e))?;
+
+    log::info!(
+        "[AI Hub] Routed to provider: {}, model: {}",
+        provider_config.provider_code,
+        model_info.model_base.model_code
+    );
+
+    // 2. 从ProviderRegistry获取Provider实例
+    let provider_registry = state.provider_registry.read().await;
+
+    let provider = provider_registry
+        .get_provider(&provider_config.provider_code)
+        .ok_or_else(|| {
+            format!(
+                "Provider not found for provider_code: {}",
+                provider_config.provider_code
+            )
+        })?;
+
+    // 3. 转换请求类型
+    let provider_req = crate::domain::dto::embeddings::EmbeddingsRequest {
         model: req.model.clone(),
+        input: req.input.clone(),
+        encoding_format: req.encoding_format.clone(),
+        user: req.user.clone(),
+    };
+
+    // 4. 调用Provider的embeddings方法
+    let response = provider
+        .embeddings(provider_req, &serde_json::json!({}))
+        .await
+        .map_err(|e| format!("Provider error: {}", e))?;
+
+    // 5. 转换响应类型
+    convert_from_provider_response(response)
+}
+
+/// 转换从Provider响应类型
+fn convert_from_provider_response(
+    response: crate::domain::vo::embeddings::EmbeddingsResponse,
+) -> std::result::Result<EmbeddingsResponse, String> {
+    Ok(EmbeddingsResponse {
+        object: response.object,
+        data: response
+            .data
+            .into_iter()
+            .map(|item| Embeddings {
+                object: item.object,
+                embedding: match item.embedding {
+                    crate::domain::vo::embeddings::Embedding::Float(vec) => Embedding::Float(vec),
+                    crate::domain::vo::embeddings::Embedding::String(s) => Embedding::String(s),
+                    crate::domain::vo::embeddings::Embedding::Json(json) => Embedding::Json(json),
+                },
+                index: item.index,
+            })
+            .collect(),
+        model: response.model,
         usage: EmbeddingUsage {
-            prompt_tokens: input_count as u32 * 100, // 估算
-            total_tokens: input_count as u32 * 100,
+            prompt_tokens: response.usage.prompt_tokens,
+            total_tokens: response.usage.total_tokens,
         },
-    }
+    })
 }

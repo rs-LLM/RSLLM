@@ -94,7 +94,7 @@ pub struct UsageLogQueryDTO {
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct UsageStatisticsQueryDTO {
     // 用途：用户ID
-    pub user_id: String,
+    pub user_id: Option<String>,
     // 用途：统计周期
     pub period: Option<String>,
     // 用途：开始时间

@@ -233,6 +233,14 @@ pub struct ChatCompletionRequest {
     // 说明：配置AI模型的推理过程参数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningConfig>,
+    // 用途：额外请求体
+    // 说明：用于传递额外的请求参数，如 thinking_budget 等
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_body: Option<serde_json::Value>,
+    // 用途：额外字段
+    // 说明：用于接收和发送模型特定的额外字段，如小米模型的特定参数
+    #[serde(default = "serde_json::Value::default", flatten)]
+    pub extra_fields: serde_json::Value,
 }
 
 // 用途：聊天完成响应枚举

@@ -27,6 +27,9 @@ pub struct SysUser {
     // 用途：用户姓名
     // 说明：用于显示用户名称
     pub name: Option<String>,
+    // 用途：用户邮箱
+    // 说明：用于用户注册和找回密码，唯一标识用户身份
+    pub email: Option<String>,
     // 用途：登录检查方式
     // 说明：定义用户登录时需要的验证方式，如密码、验证码等
     pub login_check: Option<LoginCheck>,
@@ -36,6 +39,9 @@ pub struct SysUser {
     // 用途：用户余额
     // 说明：存储用户的账户余额，用于计费系统
     pub balance: Option<f64>,
+    // 用途：用户等级
+    // 说明：用户等级（L1/L2/L3/L4/L5），用于限流和配额管理，默认L1
+    pub user_level: Option<String>,
     // 用途：创建时间
     // 说明：记录用户的创建时间
     pub create_date: Option<DateTime>,

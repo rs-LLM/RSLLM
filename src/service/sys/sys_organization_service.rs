@@ -12,7 +12,7 @@ use crate::domain::table::basic::sys_organization::SysOrganization;
 
 // 用途：导入组织VO
 // 说明：用于返回组织数据
-use crate::domain::vo::basic::sys_organization::{SysOrganizationVO, OrganizationTreeNodeVO};
+use crate::domain::vo::basic::sys_organization::{OrganizationTreeNodeVO, SysOrganizationVO};
 
 // 用途：导入自定义错误类型
 // 说明：用于处理错误情况
@@ -36,7 +36,7 @@ use rbs::value;
 
 /// 用途：组织缓存键
 /// 说明：用于缓存所有组织数据
-const ORG_KEY: &'static str = "sys_organization:all";
+const ORG_KEY: &str = "sys_organization:all";
 
 /// 用途：组织服务
 /// 说明：处理组织相关业务逻辑
@@ -63,10 +63,14 @@ impl SysOrganizationService {
     pub async fn add(&self, arg: &OrgAddDTO) -> Result<u64> {
         // 用途：检查组织代码是否已存在
         // 说明：避免重复添加组织代码
-        let old = SysOrganization::select_by_map(pool!(), value! {"code":arg.code.as_deref().unwrap_or_default()}).await?;
+        let old = SysOrganization::select_by_map(
+            pool!(),
+            value! {"code":arg.code.as_deref().unwrap_or_default()},
+        )
+        .await?;
         // 用途：如果组织代码已存在，返回错误
         // 说明：确保组织代码的唯一性
-        if old.len() > 0 {
+        if !old.is_empty() {
             return Err(Error::from(format!(
                 "{},code={}",
                 error_info!("org_exists"),
@@ -130,7 +134,8 @@ impl SysOrganizationService {
         let all = SysOrganization::select_all_custom(pool!()).await?;
         // 用途：转换为VO列表
         // 说明：将数据库实体转换为视图对象
-        let vo_list: Vec<SysOrganizationVO> = all.into_iter().map(SysOrganizationVO::from).collect();
+        let vo_list: Vec<SysOrganizationVO> =
+            all.into_iter().map(SysOrganizationVO::from).collect();
         // 用途：返回VO列表
         // 说明：告知调用者查询成功并返回数据
         Ok(vo_list)
@@ -173,14 +178,15 @@ impl SysOrganizationService {
     fn build_org_tree(&self, orgs: Vec<SysOrganization>) -> Vec<OrganizationTreeNodeVO> {
         // 用途：创建组织节点映射
         // 说明：将所有组织转换为节点，并按ID建立索引
-        let mut org_map: std::collections::HashMap<String, OrganizationTreeNodeVO> = std::collections::HashMap::new();
+        let mut org_map: std::collections::HashMap<String, OrganizationTreeNodeVO> =
+            std::collections::HashMap::new();
         // 用途：记录所有组织的parent_id
         // 说明：用于判断是否为顶级组织
         let mut parent_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         // 用途：记录组织的父子关系
         // 说明：用于构建树形结构
         let mut org_relations: Vec<(String, Option<String>)> = Vec::new();
-        
+
         // 用途：遍历所有组织，构建组织节点
         // 说明：将每个组织转换为树节点
         for org in &orgs {
@@ -190,25 +196,25 @@ impl SysOrganizationService {
                 name: org.name.clone(),
                 code: org.code.clone(),
                 org_type: org.org_type.clone(),
-                sort_order: org.sort_order.clone(),
+                sort_order: org.sort_order,
                 children: vec![],
             };
-            
+
             // 用途：将组织节点添加到映射中
             // 说明：使用ID作为键
             org_map.insert(org_id.clone(), node);
-            
+
             // 用途：记录parent_id
             // 说明：用于判断是否为顶级组织
             if let Some(parent_id) = org.parent_id.clone() {
                 parent_ids.insert(parent_id);
             }
-            
+
             // 用途：记录父子关系
             // 说明：保存组织ID和父组织ID
             org_relations.push((org_id, org.parent_id.clone()));
         }
-        
+
         // 用途：构建父子关系
         // 说明：根据记录的父子关系建立组织的层级关系
         for (org_id, parent_id) in org_relations {
@@ -229,7 +235,7 @@ impl SysOrganizationService {
                 }
             }
         }
-        
+
         // 用途：提取顶级组织
         // 说明：返回没有父组织的顶级组织（ID不在parent_ids集合中的组织）
         org_map

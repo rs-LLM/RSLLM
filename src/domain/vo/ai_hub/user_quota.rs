@@ -15,14 +15,6 @@ pub struct AiHubUserQuotaVO {
     pub user_id: String,
     // 用途：配额类型
     pub quota_type: String,
-    // 用途：总额度（分）
-    pub total_quota: f64,
-    // 用途：已用额度（分）
-    pub used_quota: f64,
-    // 用途：剩余额度（分）
-    pub remaining_quota: f64,
-    // 用途：使用率（百分比）
-    pub usage_rate: f64,
     // 用途：周期开始时间
     pub cycle_start: Option<String>,
     // 用途：周期结束时间
@@ -35,6 +27,14 @@ pub struct AiHubUserQuotaVO {
     pub need_warning: bool,
     // 用途：创建时间
     pub created_at: Option<String>,
+    // 用途：RPM限制（每分钟请求数）
+    pub rpm_limit: Option<i32>,
+    // 用途：RPM已用（每分钟请求数）
+    pub rpm_used: Option<i32>,
+    // 用途：TPM限制（每分钟令牌数）
+    pub tpm_limit: Option<i32>,
+    // 用途：TPM已用（每分钟令牌数）
+    pub tpm_used: Option<i32>,
 }
 
 // 用途：配额概览VO结构体
@@ -43,14 +43,6 @@ pub struct AiHubUserQuotaVO {
 pub struct QuotaOverviewVO {
     // 用途：用户ID
     pub user_id: String,
-    // 用途：总配额（分）
-    pub total_quota: f64,
-    // 用途：已用配额（分）
-    pub used_quota: f64,
-    // 用途：剩余额度（分）
-    pub remaining_quota: f64,
-    // 用途：整体使用率（百分比）
-    pub overall_usage_rate: f64,
     // 用途：活跃配额数量
     pub active_quota_count: i32,
     // 用途：配额列表
@@ -71,8 +63,6 @@ pub struct QuotaWarningVO {
     pub current_usage_rate: f64,
     // 用途：警告阈值（百分比）
     pub warning_threshold: f64,
-    // 用途：剩余额度（分）
-    pub remaining_quota: f64,
     // 用途：警告消息
     pub warning_message: String,
 }

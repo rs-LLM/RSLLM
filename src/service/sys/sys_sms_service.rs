@@ -35,7 +35,7 @@ impl SysSmsService {
         // 用途：设置验证码
         // 说明：将生成的验证码存储到模板参数中
         templete_arg.insert("sms_code".to_string(), sms_code.to_string());
-        
+
         // 用途：将短信信息存入缓存
         // 说明：用于后续验证验证码
         let _r = CONTEXT
@@ -52,7 +52,7 @@ impl SysSmsService {
                 },
             )
             .await?;
-        
+
         // 用途：返回成功结果
         // 说明：告知调用者短信发送成功
         Ok(())
@@ -70,7 +70,7 @@ impl SysSmsService {
                 CONTEXT.config.sms_cache_send_key_prefix, account
             ))
             .await?;
-        
+
         // 用途：匹配短信信息
         // 说明：处理短信存在和不存在的情况
         match sms {

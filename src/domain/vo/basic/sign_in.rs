@@ -64,6 +64,14 @@ pub struct SignInVO {
     #[serde(rename = "homePath")]
     #[serde(default)]
     pub home_path: Option<String>,
+    // 用途：用户邮箱
+    // 说明：用户的邮箱地址
+    #[serde(default)]
+    pub email: Option<String>,
+    // 用途：用户余额
+    // 说明：用户的账户余额，用于计费系统
+    #[serde(default)]
+    pub balance: Option<f64>,
 }
 
 // 用途：实现SysUser到SignInVO的转换
@@ -84,9 +92,11 @@ impl From<SysUser> for SignInVO {
             permissions: vec![],
             access_token: "".to_string(),
             roles: vec![],
-            avatar: Some("https://api.dicebear.com/7.x/avataaars/svg?seed=admin".to_string()),
-            desc: Some("RSLLM系统管理员".to_string()),
-            home_path: Some("/rsllm/home".to_string()),
+            avatar: Some("/user.png".to_string()),
+            desc: Some("RSLLM系统用户".to_string()),
+            home_path: Some("/home".to_string()),
+            email: value.email,
+            balance: value.balance,
         }
     }
 }

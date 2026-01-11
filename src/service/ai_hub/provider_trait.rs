@@ -13,20 +13,24 @@ use crate::error::Result;
 #[async_trait]
 pub trait AIProvider: Send + Sync {
     /// 聊天补全
-    async fn chat_completions(&self, req: &ChatCompletionRequest) -> Result<ChatCompletionResponse>;
-    
+    async fn chat_completions(&self, req: &ChatCompletionRequest)
+    -> Result<ChatCompletionResponse>;
+
     /// 文本补全
     async fn completions(&self, req: &CompletionRequest) -> Result<CompletionResponse>;
-    
+
     /// 嵌入向量生成
     async fn embeddings(&self, req: &EmbeddingRequest) -> Result<EmbeddingResponse>;
-    
+
     /// 流式聊天补全
-    async fn chat_stream(&self, req: &ChatCompletionRequest) -> Result<Box<dyn futures::Stream<Item = Result<ChatCompletionChunk>> + Send + Unpin>>;
-    
+    async fn chat_stream(
+        &self,
+        req: &ChatCompletionRequest,
+    ) -> Result<Box<dyn futures::Stream<Item = Result<ChatCompletionChunk>> + Send + Unpin>>;
+
     /// 健康检查
     async fn health_check(&self) -> Result<bool>;
-    
+
     /// 获取模型信息
     fn get_model_info(&self) -> ModelInfo;
 }

@@ -123,6 +123,14 @@ pub struct RbacRolePermission {
 // 说明：自动实现增删改查等基本操作
 crud!(RbacRolePermission {});
 
+// 用途：RbacRolePermission实现
+// 说明：提供自定义的查询方法
+impl RbacRolePermission {
+    // 用途：根据角色ID列表查询角色权限关联
+    // 说明：获取多个角色的所有权限关联信息
+    htmlsql!(select_by_role_ids(rb:&dyn Executor, role_ids:&Vec<String>) -> Vec<RbacRolePermission> => "src/domain/table/basic/rbac.html");
+}
+
 // 用途：用户角色关联表结构体
 // 说明：用于存储用户和角色的多对多关联关系
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Eq, PartialEq, Hash)]
@@ -197,7 +205,7 @@ pub async fn sync_tables(conn: &dyn Executor, mapper: &dyn ColumnMapper) {
         create_date: Some(Default::default()),
     };
     let _ = RBatis::sync(conn, mapper, &table, "rbac_permission").await;
-    
+
     // 用途：创建角色表结构
     // 说明：初始化角色表，存储系统角色信息
     let table = RbacRole {
@@ -206,7 +214,7 @@ pub async fn sync_tables(conn: &dyn Executor, mapper: &dyn ColumnMapper) {
         create_date: Some(Default::default()),
     };
     let _ = RBatis::sync(conn, mapper, &table, "rbac_role").await;
-    
+
     // 用途：创建角色权限关联表结构
     // 说明：初始化角色权限关联表，存储角色和权限的关联关系
     let table = RbacRolePermission {
@@ -216,7 +224,7 @@ pub async fn sync_tables(conn: &dyn Executor, mapper: &dyn ColumnMapper) {
         create_date: Some(Default::default()),
     };
     let _ = RBatis::sync(conn, mapper, &table, "rbac_role_permission").await;
-    
+
     // 用途：创建用户角色关联表结构
     // 说明：初始化用户角色关联表，存储用户和角色的关联关系
     let table = RbacUserRole {

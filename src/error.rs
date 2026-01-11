@@ -34,7 +34,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub mod error_codes {
     // 用途：成功
     pub const SUCCESS: &str = "0";
-    
+
     // 用途：客户端错误 (4xx)
     pub const BAD_REQUEST: &str = "400";
     pub const UNAUTHORIZED: &str = "401";
@@ -45,53 +45,53 @@ pub mod error_codes {
     pub const CONFLICT: &str = "409";
     pub const UNPROCESSABLE_ENTITY: &str = "422";
     pub const TOO_MANY_REQUESTS: &str = "429";
-    
+
     // 用途：服务器错误 (5xx)
     pub const INTERNAL_SERVER_ERROR: &str = "500";
     pub const BAD_GATEWAY: &str = "502";
     pub const SERVICE_UNAVAILABLE: &str = "503";
-    
+
     // 用途：认证错误码 (10000-10999)
     pub const AUTH_INVALID_TOKEN: &str = "10001";
     pub const AUTH_TOKEN_EXPIRED: &str = "10002";
     pub const AUTH_TOKEN_INVALID: &str = "10003";
     pub const AUTH_UNAUTHORIZED: &str = "10004";
     pub const AUTH_FORBIDDEN: &str = "10005";
-    
+
     // 用途：验证错误码 (11000-11999)
     pub const VALIDATION_INVALID_PARAM: &str = "11001";
     pub const VALIDATION_MISSING_PARAM: &str = "11002";
     pub const VALIDATION_INVALID_FORMAT: &str = "11003";
     pub const VALIDATION_OUT_OF_RANGE: &str = "11004";
-    
+
     // 用途：资源未找到错误码 (12000-12999)
     pub const NOT_FOUND_RESOURCE: &str = "12001";
     pub const NOT_FOUND_USER: &str = "12002";
     pub const NOT_FOUND_PROVIDER: &str = "12003";
     pub const NOT_FOUND_BILL: &str = "12004";
     pub const NOT_FOUND_PRICE_RULE: &str = "12005";
-    
+
     // 用途：限流错误码 (13000-13999)
     pub const RATE_LIMIT_EXCEEDED: &str = "13001";
     pub const RATE_LIMIT_API: &str = "13002";
     pub const RATE_LIMIT_USER: &str = "13003";
-    
+
     // 用途：服务端错误码 (20000-20999)
     pub const SERVER_INTERNAL_ERROR: &str = "20001";
     pub const SERVER_CONFIG_ERROR: &str = "20002";
     pub const SERVER_ENCRYPTION_ERROR: &str = "20003";
-    
+
     // 用途：数据库错误码 (21000-21999)
     pub const DATABASE_CONNECTION_ERROR: &str = "21001";
     pub const DATABASE_QUERY_ERROR: &str = "21002";
     pub const DATABASE_TRANSACTION_ERROR: &str = "21003";
     pub const DATABASE_DUPLICATE_KEY: &str = "21004";
-    
+
     // 用途：外部服务错误码 (22000-22999)
     pub const EXTERNAL_SERVICE_ERROR: &str = "22001";
     pub const EXTERNAL_SERVICE_TIMEOUT: &str = "22002";
     pub const EXTERNAL_SERVICE_UNAVAILABLE: &str = "22003";
-    
+
     // 用途：业务错误码 (30000-30999)
     pub const BUSINESS_INVALID_OPERATION: &str = "30001";
     pub const BUSINESS_INVALID_STATE: &str = "30002";
@@ -99,7 +99,7 @@ pub mod error_codes {
     pub const BUSINESS_BILLING_ERROR: &str = "30004";
     pub const BUSINESS_PRICE_RULE_ERROR: &str = "30005";
     pub const BUSINESS_STORAGE_ERROR: &str = "30006";
-    
+
     // 用途：通用错误
     pub const UNKNOWN_ERROR: &str = "99999";
 }
@@ -108,7 +108,7 @@ pub mod error_codes {
 /// 说明：表示应用程序中所有可能的失败方式
 #[derive(Debug)]
 #[non_exhaustive] // 用途：标记为非详尽枚举
-                  // 说明：允许未来扩展错误类型而不破坏现有代码
+// 说明：允许未来扩展错误类型而不破坏现有代码
 pub enum Error {
     /// 用途：默认错误类型
     /// 说明：用于包装字符串形式的错误信息
@@ -131,6 +131,9 @@ pub enum Error {
     /// 用途：验证错误
     /// 说明：用于输入验证错误
     ValidationError(String),
+    /// 用途：应用错误
+    /// 说明：用于包装ApplicationError
+    Application(ApplicationError),
     /// 用途：限流错误
     /// 说明：用于速率限制错误
     RateLimitExceeded,
@@ -160,6 +163,7 @@ impl Display for Error {
             Error::AuthError(error) => write!(f, "Auth Error: {}", error),
             Error::ExternalServiceError(error) => write!(f, "External Service Error: {}", error),
             Error::ValidationError(error) => write!(f, "Validation Error: {}", error),
+            Error::Application(error) => write!(f, "Application Error: {}", error),
             Error::RateLimitExceeded => write!(f, "Rate Limit Exceeded"),
             Error::DatabaseError(error) => write!(f, "Database Error: {}", error),
             Error::NotFound(error) => write!(f, "Not Found: {}", error),
@@ -175,11 +179,11 @@ impl StdError for Error {}
 /// 说明：允许Error类型直接作为HTTP响应返回
 impl axum::response::IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
-        use axum::http::StatusCode;
-        use axum::Json;
         use crate::domain::vo::ApiResponse;
         use crate::error::error_codes::*;
-        
+        use axum::Json;
+        use axum::http::StatusCode;
+
         let error_message = self.to_string();
         let (status_code, error_code) = match self {
             Error::AuthError(msg) => {
@@ -249,7 +253,9 @@ impl axum::response::IntoResponse for Error {
                 };
                 (StatusCode::INTERNAL_SERVER_ERROR, code)
             }
-            Error::EncryptionError(_) => (StatusCode::INTERNAL_SERVER_ERROR, SERVER_ENCRYPTION_ERROR),
+            Error::EncryptionError(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, SERVER_ENCRYPTION_ERROR)
+            }
             Error::ExternalServiceError(msg) => {
                 let code = if msg.contains("timeout") || msg.contains("超时") {
                     EXTERNAL_SERVICE_TIMEOUT
@@ -260,12 +266,13 @@ impl axum::response::IntoResponse for Error {
                 };
                 (StatusCode::BAD_GATEWAY, code)
             }
+            Error::Application(_) => (StatusCode::INTERNAL_SERVER_ERROR, SERVER_INTERNAL_ERROR),
             Error::ConfigError(_) => (StatusCode::INTERNAL_SERVER_ERROR, SERVER_CONFIG_ERROR),
             Error::E(_) => (StatusCode::INTERNAL_SERVER_ERROR, SERVER_INTERNAL_ERROR),
         };
-        
+
         let response = ApiResponse::<()>::error(error_code, &error_message);
-        
+
         (status_code, Json(response)).into_response()
     }
 }
@@ -274,7 +281,7 @@ impl axum::response::IntoResponse for Error {
 /// 说明：方便处理IO操作产生的错误
 impl From<io::Error> for Error {
     #[inline] // 用途：内联提示
-             // 说明：减少函数调用开销，提高性能
+    // 说明：减少函数调用开销，提高性能
     fn from(err: io::Error) -> Self {
         // 用途：将IO错误转换为字符串，再转换为自定义错误
         // 说明：统一错误处理，方便上层调用
@@ -288,7 +295,7 @@ impl From<&str> for Error {
     fn from(arg: &str) -> Self {
         // 用途：将字符串切片转换为自定义错误
         // 说明：允许直接使用字符串字面量创建错误
-        return Error::E(arg.to_string());
+        Error::E(arg.to_string())
     }
 }
 
@@ -298,7 +305,7 @@ impl From<std::string::String> for Error {
     fn from(arg: String) -> Self {
         // 用途：将String转换为自定义错误
         // 说明：允许直接使用String对象创建错误
-        return Error::E(arg);
+        Error::E(arg)
     }
 }
 
@@ -308,7 +315,7 @@ impl From<&dyn std::error::Error> for Error {
     fn from(arg: &dyn std::error::Error) -> Self {
         // 用途：将通用错误转换为字符串，再转换为自定义错误
         // 说明：统一处理各种类型的错误
-        return Error::E(arg.to_string());
+        Error::E(arg.to_string())
     }
 }
 
@@ -318,7 +325,7 @@ impl From<Error> for std::io::Error {
     fn from(arg: Error) -> Self {
         // 用途：将自定义错误转换为IO错误
         // 说明：允许在需要IO错误的函数中返回自定义错误
-        io::Error::new(io::ErrorKind::Other, arg.to_string())
+        io::Error::other(arg.to_string())
     }
 }
 
@@ -423,7 +430,7 @@ impl<'de> Deserialize<'de> for Error {
         let r = deserializer.deserialize_string(ErrorVisitor)?;
         // 用途：创建自定义错误对象
         // 说明：将反序列化得到的字符串转换为Error类型
-        return Ok(Error::from(r));
+        Ok(Error::from(r))
     }
 }
 
@@ -432,35 +439,93 @@ impl<'de> Deserialize<'de> for Error {
 #[derive(Debug, Clone)]
 pub enum ApplicationError {
     /// 配置相关错误
-    ConfigError { message: String, key: Option<String> },
+    ConfigError {
+        message: String,
+        key: Option<String>,
+    },
     /// 加密相关错误
-    EncryptionError { message: String, operation: Option<String> },
+    EncryptionError {
+        message: String,
+        operation: Option<String>,
+    },
     /// 业务逻辑错误
-    BusinessError { message: String, code: Option<String>, context: Option<String> },
+    BusinessError {
+        message: String,
+        code: Option<String>,
+        context: Option<String>,
+    },
     /// 认证授权错误
-    AuthError { message: String, user_id: Option<String>, operation: Option<String> },
+    AuthError {
+        message: String,
+        user_id: Option<String>,
+        operation: Option<String>,
+    },
     /// 外部服务错误
-    ExternalServiceError { message: String, service: Option<String>, endpoint: Option<String> },
+    ExternalServiceError {
+        message: String,
+        service: Option<String>,
+        endpoint: Option<String>,
+    },
     /// 验证错误
-    ValidationError { message: String, field: Option<String>, value: Option<String> },
+    ValidationError {
+        message: String,
+        field: Option<String>,
+        value: Option<String>,
+    },
     /// 限流错误
-    RateLimitExceeded { message: String, limit_type: Option<String>, reset_time: Option<String> },
+    RateLimitExceeded {
+        message: String,
+        limit_type: Option<String>,
+        reset_time: Option<String>,
+    },
     /// 数据库错误
-    DatabaseError { message: String, operation: Option<String>, table: Option<String> },
+    DatabaseError {
+        message: String,
+        operation: Option<String>,
+        table: Option<String>,
+    },
     /// 资源未找到错误
-    NotFound { message: String, resource: Option<String>, id: Option<String> },
+    NotFound {
+        message: String,
+        resource: Option<String>,
+        id: Option<String>,
+    },
     /// 配额不足错误
-    QuotaExceeded { message: String, user_id: Option<String>, required: Option<f64>, remaining: Option<f64> },
+    QuotaExceeded {
+        message: String,
+        user_id: Option<String>,
+        required: Option<f64>,
+        remaining: Option<f64>,
+    },
     /// 余额不足错误
-    BalanceExceeded { message: String, user_id: Option<String>, required: Option<f64>, remaining: Option<f64> },
+    BalanceExceeded {
+        message: String,
+        user_id: Option<String>,
+        required: Option<f64>,
+        remaining: Option<f64>,
+    },
     /// 账单相关错误
-    BillingError { message: String, bill_id: Option<String>, user_id: Option<String> },
+    BillingError {
+        message: String,
+        bill_id: Option<String>,
+        user_id: Option<String>,
+    },
     /// 价格规则错误
-    PriceRuleError { message: String, rule_id: Option<String> },
+    PriceRuleError {
+        message: String,
+        rule_id: Option<String>,
+    },
     /// JWT令牌错误
-    TokenError { message: String, kind: Option<String> },
+    TokenError {
+        message: String,
+        kind: Option<String>,
+    },
     /// 存储服务错误
-    StorageError { message: String, operation: Option<String>, bucket: Option<String> },
+    StorageError {
+        message: String,
+        operation: Option<String>,
+        bucket: Option<String>,
+    },
     /// 通用错误（向后兼容）
     GenericError { message: String },
 }
@@ -484,104 +549,156 @@ impl Display for ApplicationError {
                     write!(f, "加密错误: {}", message)
                 }
             }
-            ApplicationError::BusinessError { message, code, context } => {
-                match (code, context) {
-                    (Some(c), Some(ctx)) => write!(f, "业务错误 [{}]: {} (上下文: {})", c, message, ctx),
-                    (Some(c), None) => write!(f, "业务错误 [{}]: {}", c, message),
-                    (None, Some(ctx)) => write!(f, "业务错误: {} (上下文: {})", message, ctx),
-                    (None, None) => write!(f, "业务错误: {}", message),
+            ApplicationError::BusinessError {
+                message,
+                code,
+                context,
+            } => match (code, context) {
+                (Some(c), Some(ctx)) => {
+                    write!(f, "业务错误 [{}]: {} (上下文: {})", c, message, ctx)
                 }
-            }
-            ApplicationError::AuthError { message, user_id, operation } => {
-                match (user_id, operation) {
-                    (Some(uid), Some(op)) => write!(f, "认证错误 [用户: {}, 操作: {}]: {}", uid, op, message),
-                    (Some(uid), None) => write!(f, "认证错误 [用户: {}]: {}", uid, message),
-                    (None, Some(op)) => write!(f, "认证错误 [操作: {}]: {}", op, message),
-                    (None, None) => write!(f, "认证错误: {}", message),
+                (Some(c), None) => write!(f, "业务错误 [{}]: {}", c, message),
+                (None, Some(ctx)) => write!(f, "业务错误: {} (上下文: {})", message, ctx),
+                (None, None) => write!(f, "业务错误: {}", message),
+            },
+            ApplicationError::AuthError {
+                message,
+                user_id,
+                operation,
+            } => match (user_id, operation) {
+                (Some(uid), Some(op)) => {
+                    write!(f, "认证错误 [用户: {}, 操作: {}]: {}", uid, op, message)
                 }
-            }
-            ApplicationError::ExternalServiceError { message, service, endpoint } => {
-                match (service, endpoint) {
-                    (Some(s), Some(e)) => write!(f, "外部服务错误 [{}@{}]: {}", s, e, message),
-                    (Some(s), None) => write!(f, "外部服务错误 [{}]: {}", s, message),
-                    (None, Some(e)) => write!(f, "外部服务错误 [端点: {}]: {}", e, message),
-                    (None, None) => write!(f, "外部服务错误: {}", message),
+                (Some(uid), None) => write!(f, "认证错误 [用户: {}]: {}", uid, message),
+                (None, Some(op)) => write!(f, "认证错误 [操作: {}]: {}", op, message),
+                (None, None) => write!(f, "认证错误: {}", message),
+            },
+            ApplicationError::ExternalServiceError {
+                message,
+                service,
+                endpoint,
+            } => match (service, endpoint) {
+                (Some(s), Some(e)) => write!(f, "外部服务错误 [{}@{}]: {}", s, e, message),
+                (Some(s), None) => write!(f, "外部服务错误 [{}]: {}", s, message),
+                (None, Some(e)) => write!(f, "外部服务错误 [端点: {}]: {}", e, message),
+                (None, None) => write!(f, "外部服务错误: {}", message),
+            },
+            ApplicationError::ValidationError {
+                message,
+                field,
+                value,
+            } => match (field, value) {
+                (Some(fld), Some(val)) => {
+                    write!(f, "验证错误 [字段: {}, 值: {}]: {}", fld, val, message)
                 }
-            }
-            ApplicationError::ValidationError { message, field, value } => {
-                match (field, value) {
-                    (Some(fld), Some(val)) => write!(f, "验证错误 [字段: {}, 值: {}]: {}", fld, val, message),
-                    (Some(fld), None) => write!(f, "验证错误 [字段: {}]: {}", fld, message),
-                    (None, Some(val)) => write!(f, "验证错误 [值: {}]: {}", val, message),
-                    (None, None) => write!(f, "验证错误: {}", message),
+                (Some(fld), None) => write!(f, "验证错误 [字段: {}]: {}", fld, message),
+                (None, Some(val)) => write!(f, "验证错误 [值: {}]: {}", val, message),
+                (None, None) => write!(f, "验证错误: {}", message),
+            },
+            ApplicationError::RateLimitExceeded {
+                message,
+                limit_type,
+                reset_time,
+            } => match (limit_type, reset_time) {
+                (Some(lt), Some(rt)) => {
+                    write!(f, "限流错误 [类型: {}, 重置时间: {}]: {}", lt, rt, message)
                 }
-            }
-            ApplicationError::RateLimitExceeded { message, limit_type, reset_time } => {
-                match (limit_type, reset_time) {
-                    (Some(lt), Some(rt)) => write!(f, "限流错误 [类型: {}, 重置时间: {}]: {}", lt, rt, message),
-                    (Some(lt), None) => write!(f, "限流错误 [类型: {}]: {}", lt, message),
-                    (None, Some(rt)) => write!(f, "限流错误 [重置时间: {}]: {}", rt, message),
-                    (None, None) => write!(f, "限流错误: {}", message),
+                (Some(lt), None) => write!(f, "限流错误 [类型: {}]: {}", lt, message),
+                (None, Some(rt)) => write!(f, "限流错误 [重置时间: {}]: {}", rt, message),
+                (None, None) => write!(f, "限流错误: {}", message),
+            },
+            ApplicationError::DatabaseError {
+                message,
+                operation,
+                table,
+            } => match (operation, table) {
+                (Some(op), Some(tbl)) => {
+                    write!(f, "数据库错误 [操作: {}, 表: {}]: {}", op, tbl, message)
                 }
-            }
-            ApplicationError::DatabaseError { message, operation, table } => {
-                match (operation, table) {
-                    (Some(op), Some(tbl)) => write!(f, "数据库错误 [操作: {}, 表: {}]: {}", op, tbl, message),
-                    (Some(op), None) => write!(f, "数据库错误 [操作: {}]: {}", op, message),
-                    (None, Some(tbl)) => write!(f, "数据库错误 [表: {}]: {}", tbl, message),
-                    (None, None) => write!(f, "数据库错误: {}", message),
+                (Some(op), None) => write!(f, "数据库错误 [操作: {}]: {}", op, message),
+                (None, Some(tbl)) => write!(f, "数据库错误 [表: {}]: {}", tbl, message),
+                (None, None) => write!(f, "数据库错误: {}", message),
+            },
+            ApplicationError::NotFound {
+                message,
+                resource,
+                id,
+            } => match (resource, id) {
+                (Some(res), Some(i)) => {
+                    write!(f, "资源未找到 [资源: {}, ID: {}]: {}", res, i, message)
                 }
-            }
-            ApplicationError::NotFound { message, resource, id } => {
-                match (resource, id) {
-                    (Some(res), Some(i)) => write!(f, "资源未找到 [资源: {}, ID: {}]: {}", res, i, message),
-                    (Some(res), None) => write!(f, "资源未找到 [资源: {}]: {}", res, message),
-                    (None, Some(i)) => write!(f, "资源未找到 [ID: {}]: {}", i, message),
-                    (None, None) => write!(f, "资源未找到: {}", message),
+                (Some(res), None) => write!(f, "资源未找到 [资源: {}]: {}", res, message),
+                (None, Some(i)) => write!(f, "资源未找到 [ID: {}]: {}", i, message),
+                (None, None) => write!(f, "资源未找到: {}", message),
+            },
+            ApplicationError::QuotaExceeded {
+                message,
+                user_id,
+                required,
+                remaining,
+            } => match (user_id, required, remaining) {
+                (Some(uid), Some(req), Some(rem)) => {
+                    write!(
+                        f,
+                        "配额不足 [用户: {}, 需要: {:.2}, 剩余: {:.2}]: {}",
+                        uid, req, rem, message
+                    )
                 }
-            }
-            ApplicationError::QuotaExceeded { message, user_id, required, remaining } => {
-                match (user_id, required, remaining) {
-                    (Some(uid), Some(req), Some(rem)) => {
-                        write!(f, "配额不足 [用户: {}, 需要: {:.2}, 剩余: {:.2}]: {}", uid, req, rem, message)
-                    }
-                    (Some(uid), Some(req), None) => {
-                        write!(f, "配额不足 [用户: {}, 需要: {:.2}]: {}", uid, req, message)
-                    }
-                    (Some(uid), None, Some(rem)) => {
-                        write!(f, "配额不足 [用户: {}, 剩余: {:.2}]: {}", uid, rem, message)
-                    }
-                    (None, Some(req), Some(rem)) => {
-                        write!(f, "配额不足 [需要: {:.2}, 剩余: {:.2}]: {}", req, rem, message)
-                    }
-                    _ => write!(f, "配额不足: {}", message),
+                (Some(uid), Some(req), None) => {
+                    write!(f, "配额不足 [用户: {}, 需要: {:.2}]: {}", uid, req, message)
                 }
-            }
-            ApplicationError::BalanceExceeded { message, user_id, required, remaining } => {
-                match (user_id, required, remaining) {
-                    (Some(uid), Some(req), Some(rem)) => {
-                        write!(f, "余额不足 [用户: {}, 需要: {:.2}, 剩余: {:.2}]: {}", uid, req, rem, message)
-                    }
-                    (Some(uid), Some(req), None) => {
-                        write!(f, "余额不足 [用户: {}, 需要: {:.2}]: {}", uid, req, message)
-                    }
-                    (Some(uid), None, Some(rem)) => {
-                        write!(f, "余额不足 [用户: {}, 剩余: {:.2}]: {}", uid, rem, message)
-                    }
-                    (None, Some(req), Some(rem)) => {
-                        write!(f, "余额不足 [需要: {:.2}, 剩余: {:.2}]: {}", req, rem, message)
-                    }
-                    _ => write!(f, "余额不足: {}", message),
+                (Some(uid), None, Some(rem)) => {
+                    write!(f, "配额不足 [用户: {}, 剩余: {:.2}]: {}", uid, rem, message)
                 }
-            }
-            ApplicationError::BillingError { message, bill_id, user_id } => {
-                match (bill_id, user_id) {
-                    (Some(bid), Some(uid)) => write!(f, "账单错误 [账单: {}, 用户: {}]: {}", bid, uid, message),
-                    (Some(bid), None) => write!(f, "账单错误 [账单: {}]: {}", bid, message),
-                    (None, Some(uid)) => write!(f, "账单错误 [用户: {}]: {}", uid, message),
-                    (None, None) => write!(f, "账单错误: {}", message),
+                (None, Some(req), Some(rem)) => {
+                    write!(
+                        f,
+                        "配额不足 [需要: {:.2}, 剩余: {:.2}]: {}",
+                        req, rem, message
+                    )
                 }
-            }
+                _ => write!(f, "配额不足: {}", message),
+            },
+            ApplicationError::BalanceExceeded {
+                message,
+                user_id,
+                required,
+                remaining,
+            } => match (user_id, required, remaining) {
+                (Some(uid), Some(req), Some(rem)) => {
+                    write!(
+                        f,
+                        "余额不足 [用户: {}, 需要: {:.2}, 剩余: {:.2}]: {}",
+                        uid, req, rem, message
+                    )
+                }
+                (Some(uid), Some(req), None) => {
+                    write!(f, "余额不足 [用户: {}, 需要: {:.2}]: {}", uid, req, message)
+                }
+                (Some(uid), None, Some(rem)) => {
+                    write!(f, "余额不足 [用户: {}, 剩余: {:.2}]: {}", uid, rem, message)
+                }
+                (None, Some(req), Some(rem)) => {
+                    write!(
+                        f,
+                        "余额不足 [需要: {:.2}, 剩余: {:.2}]: {}",
+                        req, rem, message
+                    )
+                }
+                _ => write!(f, "余额不足: {}", message),
+            },
+            ApplicationError::BillingError {
+                message,
+                bill_id,
+                user_id,
+            } => match (bill_id, user_id) {
+                (Some(bid), Some(uid)) => {
+                    write!(f, "账单错误 [账单: {}, 用户: {}]: {}", bid, uid, message)
+                }
+                (Some(bid), None) => write!(f, "账单错误 [账单: {}]: {}", bid, message),
+                (None, Some(uid)) => write!(f, "账单错误 [用户: {}]: {}", uid, message),
+                (None, None) => write!(f, "账单错误: {}", message),
+            },
             ApplicationError::PriceRuleError { message, rule_id } => {
                 if let Some(rid) = rule_id {
                     write!(f, "价格规则错误 [规则: {}]: {}", rid, message)
@@ -596,14 +713,18 @@ impl Display for ApplicationError {
                     write!(f, "令牌错误: {}", message)
                 }
             }
-            ApplicationError::StorageError { message, operation, bucket } => {
-                match (operation, bucket) {
-                    (Some(op), Some(bkt)) => write!(f, "存储错误 [操作: {}, 桶: {}]: {}", op, bkt, message),
-                    (Some(op), None) => write!(f, "存储错误 [操作: {}]: {}", op, message),
-                    (None, Some(bkt)) => write!(f, "存储错误 [桶: {}]: {}", bkt, message),
-                    (None, None) => write!(f, "存储错误: {}", message),
+            ApplicationError::StorageError {
+                message,
+                operation,
+                bucket,
+            } => match (operation, bucket) {
+                (Some(op), Some(bkt)) => {
+                    write!(f, "存储错误 [操作: {}, 桶: {}]: {}", op, bkt, message)
                 }
-            }
+                (Some(op), None) => write!(f, "存储错误 [操作: {}]: {}", op, message),
+                (None, Some(bkt)) => write!(f, "存储错误 [桶: {}]: {}", bkt, message),
+                (None, None) => write!(f, "存储错误: {}", message),
+            },
             ApplicationError::GenericError { message } => {
                 write!(f, "{}", message)
             }
@@ -619,10 +740,10 @@ impl StdError for ApplicationError {}
 /// 说明：允许ApplicationError类型直接作为HTTP响应返回
 impl axum::response::IntoResponse for ApplicationError {
     fn into_response(self) -> axum::response::Response {
-        use axum::http::StatusCode;
-        use axum::Json;
         use crate::domain::vo::ApiResponse;
-        
+        use axum::Json;
+        use axum::http::StatusCode;
+
         // 根据错误类型确定HTTP状态码和错误码
         let (status_code, error_code) = match self {
             ApplicationError::BusinessError { .. } => (StatusCode::BAD_REQUEST, "400"),
@@ -642,9 +763,9 @@ impl axum::response::IntoResponse for ApplicationError {
             ApplicationError::StorageError { .. } => (StatusCode::INTERNAL_SERVER_ERROR, "500"),
             ApplicationError::GenericError { .. } => (StatusCode::INTERNAL_SERVER_ERROR, "500"),
         };
-        
+
         let response = ApiResponse::<()>::error(error_code, &self.to_string());
-        
+
         (status_code, Json(response)).into_response()
     }
 }
@@ -658,7 +779,9 @@ impl From<ApplicationError> for Error {
             ApplicationError::EncryptionError { message, .. } => Error::EncryptionError(message),
             ApplicationError::BusinessError { message, .. } => Error::BusinessError(message),
             ApplicationError::AuthError { message, .. } => Error::AuthError(message),
-            ApplicationError::ExternalServiceError { message, .. } => Error::ExternalServiceError(message),
+            ApplicationError::ExternalServiceError { message, .. } => {
+                Error::ExternalServiceError(message)
+            }
             ApplicationError::ValidationError { message, .. } => Error::ValidationError(message),
             ApplicationError::RateLimitExceeded { .. } => Error::RateLimitExceeded,
             ApplicationError::DatabaseError { message, .. } => Error::DatabaseError(message),
@@ -680,15 +803,50 @@ impl From<ApplicationError> for Error {
 impl From<Error> for ApplicationError {
     fn from(err: Error) -> Self {
         match err {
-            Error::ConfigError(msg) => ApplicationError::ConfigError { message: msg, key: None },
-            Error::EncryptionError(msg) => ApplicationError::EncryptionError { message: msg, operation: None },
-            Error::BusinessError(msg) => ApplicationError::BusinessError { message: msg, code: None, context: None },
-            Error::AuthError(msg) => ApplicationError::AuthError { message: msg, user_id: None, operation: None },
-            Error::ExternalServiceError(msg) => ApplicationError::ExternalServiceError { message: msg, service: None, endpoint: None },
-            Error::ValidationError(msg) => ApplicationError::ValidationError { message: msg, field: None, value: None },
-            Error::RateLimitExceeded => ApplicationError::RateLimitExceeded { message: "Rate limit exceeded".to_string(), limit_type: None, reset_time: None },
-            Error::DatabaseError(msg) => ApplicationError::DatabaseError { message: msg, operation: None, table: None },
-            Error::NotFound(msg) => ApplicationError::NotFound { message: msg, resource: None, id: None },
+            Error::ConfigError(msg) => ApplicationError::ConfigError {
+                message: msg,
+                key: None,
+            },
+            Error::EncryptionError(msg) => ApplicationError::EncryptionError {
+                message: msg,
+                operation: None,
+            },
+            Error::BusinessError(msg) => ApplicationError::BusinessError {
+                message: msg,
+                code: None,
+                context: None,
+            },
+            Error::AuthError(msg) => ApplicationError::AuthError {
+                message: msg,
+                user_id: None,
+                operation: None,
+            },
+            Error::ExternalServiceError(msg) => ApplicationError::ExternalServiceError {
+                message: msg,
+                service: None,
+                endpoint: None,
+            },
+            Error::ValidationError(msg) => ApplicationError::ValidationError {
+                message: msg,
+                field: None,
+                value: None,
+            },
+            Error::RateLimitExceeded => ApplicationError::RateLimitExceeded {
+                message: "Rate limit exceeded".to_string(),
+                limit_type: None,
+                reset_time: None,
+            },
+            Error::DatabaseError(msg) => ApplicationError::DatabaseError {
+                message: msg,
+                operation: None,
+                table: None,
+            },
+            Error::NotFound(msg) => ApplicationError::NotFound {
+                message: msg,
+                resource: None,
+                id: None,
+            },
+            Error::Application(app_err) => app_err,
             Error::E(msg) => ApplicationError::GenericError { message: msg },
         }
     }
@@ -706,7 +864,9 @@ impl From<String> for ApplicationError {
 /// 说明：方便直接使用字符串字面量创建ApplicationError
 impl From<&str> for ApplicationError {
     fn from(msg: &str) -> Self {
-        ApplicationError::GenericError { message: msg.to_string() }
+        ApplicationError::GenericError {
+            message: msg.to_string(),
+        }
     }
 }
 
@@ -738,7 +898,7 @@ impl From<io::Error> for ApplicationError {
 /// 说明：允许ApplicationError在需要io::Error的上下文中使用
 impl From<ApplicationError> for io::Error {
     fn from(err: ApplicationError) -> Self {
-        io::Error::new(io::ErrorKind::Other, err.to_string())
+        io::Error::other(err.to_string())
     }
 }
 
@@ -746,7 +906,9 @@ impl From<ApplicationError> for io::Error {
 /// 说明：统一处理各种标准错误类型
 impl From<&dyn std::error::Error> for ApplicationError {
     fn from(arg: &dyn std::error::Error) -> Self {
-        ApplicationError::GenericError { message: arg.to_string() }
+        ApplicationError::GenericError {
+            message: arg.to_string(),
+        }
     }
 }
 

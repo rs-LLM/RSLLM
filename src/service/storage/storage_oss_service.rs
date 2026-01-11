@@ -18,7 +18,6 @@ use aws_sdk_s3::primitives::ByteStream;
 // 说明：创建和配置S3客户端，用于与S3兼容存储服务交互
 use aws_sdk_s3::{Client, Config};
 
-
 // 用途：导入serde序列化和反序列化宏
 // 说明：支持结构体的JSON序列化和反序列化
 use serde::{Deserialize, Serialize};
@@ -87,11 +86,12 @@ impl S3Config {
         if arg.starts_with("s3://") {
             // 用途：解析JSON配置
             // 说明：将去掉"s3://"前缀的字符串解析为S3Config结构体
-            let v = serde_json::from_str(arg.trim_start_matches("s3://"))
-                .map_err(|e| ApplicationError::ConfigError {
+            let v = serde_json::from_str(arg.trim_start_matches("s3://")).map_err(|e| {
+                ApplicationError::ConfigError {
                     message: e.to_string(),
                     key: Some("s3_config".to_string()),
-                })?;
+                }
+            })?;
             Ok(v)
         } else {
             // 用途：返回错误
@@ -111,7 +111,7 @@ impl FileS3Service {
         // 用途：创建S3凭证
         // 说明：使用配置中的访问密钥和密钥创建凭证，用于身份验证
         let credentials = Credentials::new(cfg.access_key, cfg.secret_key, None, None, "minio");
-        
+
         // 用途：构建S3客户端配置
         // 说明：配置S3客户端，包括区域、凭证、端点等
         let config = Config::builder()
@@ -136,15 +136,15 @@ impl FileS3Service {
             // 用途：构建配置
             // 说明：完成配置构建，生成最终的S3客户端配置
             .build();
-        
+
         // 用途：创建S3客户端
         // 说明：使用配置创建S3客户端实例
         let client = Client::from_conf(config);
-        
+
         // 用途：返回FileS3Service实例
         // 说明：创建并返回初始化后的S3存储服务实例
         Self {
-            client: client,
+            client,
             bucket: cfg.bucket.to_string(),
         }
     }
@@ -160,11 +160,11 @@ impl IStorageService for FileS3Service {
         // 用途：去除路径开头的斜杠
         // 说明：S3键名不应以斜杠开头，避免路径错误
         let name = name.trim_start_matches("/").to_string();
-        
+
         // 用途：将字符串路径转换为PathBuf
         // 说明：方便进行路径操作
         let name = PathBuf::from(name);
-        
+
         // 用途：执行S3 PutObject操作
         // 说明：将文件数据上传到指定的S3存储桶和键
         let _resp = self
@@ -180,7 +180,7 @@ impl IStorageService for FileS3Service {
                 operation: Some("put_object".to_string()),
                 bucket: Some(self.bucket.clone()),
             })?;
-        
+
         // 用途：返回文件路径
         // 说明：返回成功上传的文件路径，方便后续访问
         Ok(name.to_str().unwrap_or_default().to_string())
@@ -192,11 +192,11 @@ impl IStorageService for FileS3Service {
         // 用途：去除路径开头的斜杠
         // 说明：S3键名不应以斜杠开头，避免路径错误
         let name = name.trim_start_matches("/").to_string();
-        
+
         // 用途：将字符串路径转换为PathBuf
         // 说明：方便进行路径操作
         let name = PathBuf::from(name);
-        
+
         // 用途：执行S3 GetObject操作
         // 说明：从指定的S3存储桶和键下载文件数据
         let resp = self
@@ -211,15 +211,15 @@ impl IStorageService for FileS3Service {
                 operation: Some("get_object".to_string()),
                 bucket: Some(self.bucket.clone()),
             })?;
-        
+
         // 用途：创建数据缓冲区
         // 说明：用于存储下载的文件数据
         let mut buf = vec![];
-        
+
         // 用途：读取文件数据
         // 说明：将S3返回的字节流读取到缓冲区
         resp.body.into_async_read().read_to_end(&mut buf).await?;
-        
+
         // 用途：返回文件数据
         // 说明：返回成功下载的文件数据
         Ok(buf)
@@ -231,11 +231,11 @@ impl IStorageService for FileS3Service {
         // 用途：去除路径开头的斜杠
         // 说明：S3键名不应以斜杠开头，避免路径错误
         let name = name.trim_start_matches("/").to_string();
-        
+
         // 用途：将字符串路径转换为PathBuf
         // 说明：方便进行路径操作
         let name = PathBuf::from(name);
-        
+
         // 用途：执行S3 ListObjectsV2操作
         // 说明：列出指定前缀下的所有对象
         let resp = self
@@ -250,11 +250,11 @@ impl IStorageService for FileS3Service {
                 operation: Some("list_objects_v2".to_string()),
                 bucket: Some(self.bucket.clone()),
             })?;
-        
+
         // 用途：创建结果列表
         // 说明：用于存储文件列表
         let mut data = vec![];
-        
+
         // 用途：遍历返回的对象列表
         // 说明：逐个获取对象的键名
         for object in resp.contents() {
@@ -262,7 +262,7 @@ impl IStorageService for FileS3Service {
             // 说明：记录S3存储中的文件路径
             data.push(object.key().unwrap_or_default().to_string());
         }
-        
+
         // 用途：返回文件列表
         // 说明：返回成功获取的文件路径列表
         Ok(data)
@@ -274,11 +274,11 @@ impl IStorageService for FileS3Service {
         // 用途：去除路径开头的斜杠
         // 说明：S3键名不应以斜杠开头，避免路径错误
         let name = name.trim_start_matches("/").to_string();
-        
+
         // 用途：将字符串路径转换为PathBuf
         // 说明：方便进行路径操作
         let name = PathBuf::from(name);
-        
+
         // 用途：执行S3 DeleteObject操作
         // 说明：删除指定的S3对象
         let _resp = self
@@ -293,7 +293,7 @@ impl IStorageService for FileS3Service {
                 operation: Some("delete_object".to_string()),
                 bucket: Some(self.bucket.clone()),
             })?;
-        
+
         // 用途：返回操作结果
         // 说明：返回成功删除的结果
         Ok(())

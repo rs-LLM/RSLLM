@@ -3,10 +3,10 @@
 use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 // 用途：导入rbatis的CRUD宏
 // 说明：用于自动生成增删改查操作
-use rbatis::{crud};
+use rbatis::crud;
 
 // 用途：用户配额表结构体（扩展版）
 // 说明：管理用户的配额和余额，支持周期性配额和多级警告
@@ -18,15 +18,6 @@ pub struct AiHubUserQuota {
     // 用途：用户ID
     // 说明：配额所属用户的唯一标识符
     pub user_id: String,
-    // 用途：总配额
-    // 说明：用户拥有的总配额额度
-    pub total_quota: f64,
-    // 用途：已用配额
-    // 说明：用户已经使用的配额额度
-    pub used_quota: f64,
-    // 用途：剩余配额
-    // 说明：用户剩余的配额额度
-    pub remaining_quota: f64,
     // 用途：配额周期
     // 说明：配额的周期类型，如"daily"、"weekly"、"monthly"
     pub quota_period: Option<String>,
@@ -54,6 +45,24 @@ pub struct AiHubUserQuota {
     // 用途：最后使用时间
     // 说明：配额最后一次被使用的时间
     pub last_used_at: Option<DateTime>,
+    // 用途：每分钟请求数限制
+    // 说明：限流配置，每分钟允许的最大请求数（RPM）
+    pub rpm_limit: Option<i32>,
+    // 用途：已使用的每分钟请求数
+    // 说明：当前分钟内已使用的请求数
+    pub rpm_used: Option<i32>,
+    // 用途：RPM重置时间
+    // 说明：RPM计数器的重置时间
+    pub rpm_reset_time: Option<DateTime>,
+    // 用途：每分钟令牌数限制
+    // 说明：限流配置，每分钟允许的最大令牌数（TPM）
+    pub tpm_limit: Option<i32>,
+    // 用途：已使用的每分钟令牌数
+    // 说明：当前分钟内已使用的令牌数
+    pub tpm_used: Option<i32>,
+    // 用途：TPM重置时间
+    // 说明：TPM计数器的重置时间
+    pub tpm_reset_time: Option<DateTime>,
 }
 
 // 用途：生成AiHubUserQuota的CRUD操作宏

@@ -10,54 +10,53 @@ use std::io::Read;
 
 /// 用途：应用程序配置结构体
 /// 说明：集中管理应用程序的所有配置项
-#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[derive(Clone)]
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, Clone)]
 pub struct ApplicationConfig {
-    pub server_url: String,         // 用途：服务器监听地址
-                                    // 说明：指定服务器启动时监听的IP和端口
-    pub db_url: String,             // 用途：数据库连接URL
-                                    // 说明：用于连接数据库服务器
-    pub db_pool_len: usize,         // 用途：数据库连接池大小
-                                    // 说明：控制同时连接数据库的最大连接数
-    pub db_pool_timeout: usize,     // 用途：数据库连接超时时间
-                                    // 说明：设置获取数据库连接的超时时间
-    pub log_dir: String,            // 用途：日志文件存储目录
-                                    // 说明：指定日志文件的保存位置
-    pub log_rolling: String,        // 用途：日志滚动策略
-                                    // 说明：控制日志文件的滚动方式（按大小、按时间等）
-    pub log_pack_compress: String,  // 用途：日志压缩策略
-                                    // 说明：指定日志文件的压缩方式
-    pub log_keep_type: String,      // 用途：日志保留策略
-                                    // 说明：控制日志文件的保留时间或数量
-    pub log_level: String,          // 用途：日志级别
-                                    // 说明：指定日志输出的最低级别（debug、info、warn、error）
-    pub log_chan_len: Option<usize>,// 用途：日志通道长度
-                                    // 说明：控制日志处理的缓冲大小
+    pub server_url: String, // 用途：服务器监听地址
+    // 说明：指定服务器启动时监听的IP和端口
+    pub db_url: String, // 用途：数据库连接URL
+    // 说明：用于连接数据库服务器
+    pub db_pool_len: usize, // 用途：数据库连接池大小
+    // 说明：控制同时连接数据库的最大连接数
+    pub db_pool_timeout: usize, // 用途：数据库连接超时时间
+    // 说明：设置获取数据库连接的超时时间
+    pub log_dir: String, // 用途：日志文件存储目录
+    // 说明：指定日志文件的保存位置
+    pub log_rolling: String, // 用途：日志滚动策略
+    // 说明：控制日志文件的滚动方式（按大小、按时间等）
+    pub log_pack_compress: String, // 用途：日志压缩策略
+    // 说明：指定日志文件的压缩方式
+    pub log_keep_type: String, // 用途：日志保留策略
+    // 说明：控制日志文件的保留时间或数量
+    pub log_level: String, // 用途：日志级别
+    // 说明：指定日志输出的最低级别（debug、info、warn、error）
+    pub log_chan_len: Option<usize>, // 用途：日志通道长度
+    // 说明：控制日志处理的缓冲大小
     pub sms_cache_send_key_prefix: String, // 用途：短信发送缓存键前缀
-                                           // 说明：用于生成短信发送缓存的唯一标识
-    pub jwt_secret: String,         // 用途：JWT密钥
-                                    // 说明：用于JWT令牌的签名和验证
-    pub jwt_exp: usize,             // 用途：JWT过期时间
-                                    // 说明：设置JWT令牌的有效时间（秒）
-    pub jwt_refresh_token: usize,   // 用途：JWT刷新令牌过期时间
-                                    // 说明：设置刷新令牌的有效时间（秒）
-    pub cache: String,              // 用途：缓存配置
-                                    // 说明：指定缓存的类型和配置
-    pub storage: String,            // 用途：存储配置
-                                    // 说明：指定文件存储的类型和配置
-    pub login_fail_retry: u64,      // 用途：登录失败重试次数
-                                    // 说明：控制登录失败后允许重试的最大次数
+    // 说明：用于生成短信发送缓存的唯一标识
+    pub jwt_secret: String, // 用途：JWT密钥
+    // 说明：用于JWT令牌的签名和验证
+    pub jwt_exp: usize, // 用途：JWT过期时间
+    // 说明：设置JWT令牌的有效时间（秒）
+    pub jwt_refresh_token: usize, // 用途：JWT刷新令牌过期时间
+    // 说明：设置刷新令牌的有效时间（秒）
+    pub cache: String, // 用途：缓存配置
+    // 说明：指定缓存的类型和配置
+    pub storage: String, // 用途：存储配置
+    // 说明：指定文件存储的类型和配置
+    pub login_fail_retry: u64, // 用途：登录失败重试次数
+    // 说明：控制登录失败后允许重试的最大次数
     pub login_fail_retry_wait_sec: u64, // 用途：登录失败重试等待时间
-                                        // 说明：设置登录失败后需要等待的时间（秒）
-    pub trash_recycle_days: u64,    // 用途：回收站回收天数
-                                    // 说明：设置回收站中数据的自动清理时间（天）
-    pub datetime_format: String,    // 用途：日期时间格式
-                                    // 说明：统一应用程序中日期时间的格式化方式
+    // 说明：设置登录失败后需要等待的时间（秒）
+    pub trash_recycle_days: u64, // 用途：回收站回收天数
+    // 说明：设置回收站中数据的自动清理时间（天）
+    pub datetime_format: String, // 用途：日期时间格式
+    // 说明：统一应用程序中日期时间的格式化方式
     pub errors: HashMap<String, String>, // 用途：错误码映射
-                                         // 说明：存储错误码与错误信息的对应关系
+    // 说明：存储错误码与错误信息的对应关系
     #[serde(default)]
     pub error_infos: HashMap<String, String>, // 用途：错误信息反向映射
-                                             // 说明：存储错误信息与错误码的对应关系，用于反向查找
+                                              // 说明：存储错误信息与错误码的对应关系，用于反向查找
 }
 
 /// 用途：ApplicationConfig的默认实现
@@ -76,7 +75,8 @@ impl Default for ApplicationConfig {
             .expect("read 'application.json5' fail");
         // 用途：解析配置数据
         // 说明：将JSON5格式的配置转换为ApplicationConfig结构体
-        let mut result: ApplicationConfig = json5::from_str(&cfg_data).expect("load config file fail");
+        let mut result: ApplicationConfig =
+            json5::from_str(&cfg_data).expect("load config file fail");
         // 用途：初始化配置信息
         // 说明：处理配置中的错误信息映射
         result.init_infos();
@@ -141,7 +141,7 @@ impl ApplicationConfig {
     pub fn debug(&self) -> bool {
         // 用途：检查编译断言
         // 说明：使用Rust内置的调试断言来判断当前运行模式
-        if cfg!(debug_assertions) { true } else { false }
+        cfg!(debug_assertions)
     }
 }
 

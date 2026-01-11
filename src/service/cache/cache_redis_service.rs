@@ -14,7 +14,6 @@ use crate::service::ICacheService;
 // 说明：实现异步trait方法，支持异步缓存操作
 use async_trait::async_trait;
 
-
 // 用途：导入Redis相关类型
 // 说明：使用Redis作为缓存存储，需要Redis客户端和连接类型
 use redis::{RedisResult, aio::MultiplexedConnection};
@@ -34,16 +33,16 @@ impl RedisCacheService {
         // 用途：打印Redis连接信息
         // 说明：调试时显示当前连接的Redis地址
         println!("[rsllm] connect redis ({})...", url);
-        
+
         // 用途：打开Redis客户端连接
         // 说明：根据提供的URL创建Redis客户端，用于后续的Redis操作
         let client = redis::Client::open(url)
             .map_err(|e| Error::from(format!("open redis client failed={}", e)))?;
-        
+
         // 用途：打印Redis连接成功信息
         // 说明：调试时确认Redis连接已成功建立
         println!("[rsllm] connect redis success!");
-        
+
         // 用途：返回RedisCacheService实例
         // 说明：创建并返回初始化后的Redis缓存服务实例
         Ok(Self { client })
@@ -59,7 +58,7 @@ impl RedisCacheService {
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| format!("RedisService connect fail:{}", e))?;
-        
+
         // 用途：返回Redis连接
         // 说明：返回成功获取的Redis连接，用于后续的命令执行
         Ok(conn)
@@ -76,11 +75,11 @@ impl ICacheService for RedisCacheService {
         // 用途：转换键为字符串
         // 说明：Redis命令需要String类型的键
         let k = k.to_string();
-        
+
         // 用途：转换值为字符串
         // 说明：Redis命令需要String类型的值
         let v = v.to_string();
-        
+
         // 用途：调用set_string_ex方法设置缓存
         // 说明：复用带过期时间的设置方法，传入None表示永久有效
         return self.set_string_ex(&k, &v, None).await;
@@ -92,16 +91,16 @@ impl ICacheService for RedisCacheService {
         // 用途：转换键为字符串
         // 说明：Redis命令需要String类型的键
         let k = k.to_string();
-        
+
         // 用途：获取Redis连接
         // 说明：获取连接用于执行Redis GET命令
         let mut conn = self.get_conn().await?;
-        
+
         // 用途：执行Redis GET命令
         // 说明：从Redis中获取指定键的值
         let result: RedisResult<Option<String>> =
             redis::cmd("GET").arg(&[&k]).query_async(&mut conn).await;
-        
+
         // 用途：处理GET命令结果
         // 说明：根据命令执行结果返回对应的值或错误
         return match result {
@@ -124,15 +123,15 @@ impl ICacheService for RedisCacheService {
         // 用途：转换键为字符串
         // 说明：Redis命令需要String类型的键
         let k = k.to_string();
-        
+
         // 用途：转换值为字符串
         // 说明：Redis命令需要String类型的值
         let v = v.to_string();
-        
+
         // 用途：获取Redis连接
         // 说明：获取连接用于执行Redis SET命令
         let mut conn = self.get_conn().await?;
-        
+
         // 用途：根据是否设置过期时间执行不同的SET命令
         // 说明：支持带过期时间和不带过期时间的SET操作
         return if ex.is_none() {
@@ -176,11 +175,11 @@ impl ICacheService for RedisCacheService {
         // 用途：转换键为字符串
         // 说明：Redis命令需要String类型的键
         let k = k.to_string();
-        
+
         // 用途：获取Redis连接
         // 说明：获取连接用于执行Redis TTL命令
         let mut conn = self.get_conn().await?;
-        
+
         // 用途：执行Redis TTL命令
         // 说明：获取指定键的剩余生存时间
         return match redis::cmd("TTL").arg(&[k]).query_async(&mut conn).await {

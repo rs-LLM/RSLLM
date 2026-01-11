@@ -13,8 +13,6 @@ pub struct CreateQuotaDTO {
     pub user_id: String,
     // 用途：配额类型
     pub quota_type: String,
-    // 用途：总额度（分）
-    pub total_quota: f64,
     // 用途：周期开始时间
     pub cycle_start: Option<String>,
     // 用途：周期结束时间
@@ -29,12 +27,6 @@ pub struct CreateQuotaDTO {
 pub struct UpdateQuotaDTO {
     // 用途：配额ID
     pub id: String,
-    // 用途：总额度（分）
-    pub total_quota: Option<f64>,
-    // 用途：已用额度（分）
-    pub used_quota: Option<f64>,
-    // 用途：剩余额度（分）
-    pub remaining_quota: Option<f64>,
     // 用途：周期开始时间
     pub cycle_start: Option<String>,
     // 用途：周期结束时间
@@ -43,30 +35,6 @@ pub struct UpdateQuotaDTO {
     pub status: Option<String>,
     // 用途：警告阈值（百分比）
     pub warning_threshold: Option<f64>,
-}
-
-// 用途：配额充值DTO
-// 说明：用于给用户配额充值
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-pub struct RechargeQuotaDTO {
-    // 用途：用户ID
-    pub user_id: String,
-    // 用途：充值金额（分）
-    pub amount: f64,
-    // 用途：备注
-    pub remark: Option<String>,
-}
-
-// 用途：配额扣减DTO
-// 说明：用于扣减用户配额
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-pub struct DeductQuotaDTO {
-    // 用途：扣减金额（分）
-    pub amount: f64,
-    // 用途：关联的请求ID
-    pub request_id: Option<String>,
-    // 用途：备注
-    pub remark: Option<String>,
 }
 
 // 用途：配额查询DTO
@@ -85,20 +53,4 @@ pub struct QuotaQueryDTO {
     pub page: Option<i64>,
     // 用途：每页数量
     pub page_size: Option<i64>,
-}
-
-// 用途：配额分配DTO
-// 说明：用于给用户分配配额
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-pub struct AllocateQuotaDTO {
-    // 用途：用户ID
-    pub user_id: String,
-    // 用途：配额类型
-    pub quota_type: String,
-    // 用途：分配额度（分）
-    pub amount: f64,
-    // 用途：是否覆盖现有配额
-    pub overwrite: Option<bool>,
-    // 用途：备注
-    pub remark: Option<String>,
 }

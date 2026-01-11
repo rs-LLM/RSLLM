@@ -1,15 +1,16 @@
 //! 配额管理服务模块
-//! 提供用户配额的分配、扣减、充值和查询功能
+//! 提供基于用户等级的RPM/TPM限流管理功能
+use crate::domain::dto::ai_hub::user_quota::{CreateQuotaDTO, QuotaQueryDTO, UpdateQuotaDTO};
+use crate::domain::table::ai_hub::user_level_config::UserLevelConfig;
 use crate::domain::table::ai_hub::user_quota::AiHubUserQuota;
 use crate::domain::table::basic::SysUser;
-use crate::domain::dto::user_quota::{CreateQuotaDTO, UpdateQuotaDTO, RechargeQuotaDTO, DeductQuotaDTO, QuotaQueryDTO, AllocateQuotaDTO};
-use crate::domain::vo::user_quota::{AiHubUserQuotaVO, QuotaOverviewVO, QuotaWarningVO};
+use crate::domain::vo::ai_hub::user_quota::{AiHubUserQuotaVO, QuotaOverviewVO, QuotaWarningVO};
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::pool;
 use rbatis::rbdc::DateTime;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use std::str::FromStr;
+use utoipa::ToSchema;
 
 /// 配额列表响应结构体
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -20,41 +21,53 @@ pub struct ListQuotasResponse {
     pub size: i64,
 }
 
+/// 配额检查结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotaCheckResult {
+    pub allowed: bool,
+    pub rpm_remaining: i32,
+    pub tpm_remaining: i32,
+    pub warning: Option<String>,
+}
+
 /// 配额管理服务
 ///
-/// 负责用户配额的分配、扣减、充值和查询
+/// 负责基于用户等级的RPM/TPM限流管理
 #[derive(Clone)]
 pub struct QuotaService {}
 
 impl QuotaService {
     /// 创建配额
     pub async fn create_quota(&self, dto: CreateQuotaDTO) -> ApplicationResult<String> {
-        let remaining_quota = dto.total_quota;
-        
         let cycle_start = match &dto.cycle_start {
-            Some(t) => Some(DateTime::from_str(t).map_err(|e| ApplicationError::ValidationError {
-                message: format!("Invalid cycle_start: {}", e),
-                field: Some("cycle_start".to_string()),
-                value: Some(t.clone()),
-            })?),
+            Some(t) => {
+                Some(
+                    DateTime::from_str(t).map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid cycle_start: {}", e),
+                        field: Some("cycle_start".to_string()),
+                        value: Some(t.clone()),
+                    })?,
+                )
+            }
             None => None,
         };
-        
+
         let cycle_end = match &dto.cycle_end {
-            Some(t) => Some(DateTime::from_str(t).map_err(|e| ApplicationError::ValidationError {
-                message: format!("Invalid cycle_end: {}", e),
-                field: Some("cycle_end".to_string()),
-                value: Some(t.clone()),
-            })?),
+            Some(t) => {
+                Some(
+                    DateTime::from_str(t).map_err(|e| ApplicationError::ValidationError {
+                        message: format!("Invalid cycle_end: {}", e),
+                        field: Some("cycle_end".to_string()),
+                        value: Some(t.clone()),
+                    })?,
+                )
+            }
             None => None,
         };
 
         let quota = AiHubUserQuota {
-            id: Some(uuid::Uuid::new_v4().to_string()),
+            id: Some(ulid::Ulid::new().to_string()),
             user_id: dto.user_id,
-            total_quota: dto.total_quota,
-            used_quota: 0.0,
-            remaining_quota,
             quota_period: Some(dto.quota_type),
             period_start: cycle_start,
             period_end: cycle_end,
@@ -64,57 +77,54 @@ impl QuotaService {
             created_at: Some(DateTime::now()),
             updated_at: Some(DateTime::now()),
             last_used_at: None,
+            rpm_limit: None,
+            rpm_used: Some(0),
+            rpm_reset_time: Some(DateTime::now()),
+            tpm_limit: None,
+            tpm_used: Some(0),
+            tpm_reset_time: Some(DateTime::now()),
         };
 
-        let id = quota.id.clone().ok_or_else(|| ApplicationError::BusinessError {
-            message: "Failed to generate quota ID".to_string(),
-            code: Some("QUOTA_ID_GENERATION_FAILED".to_string()),
-            context: Some("Failed to generate quota ID after successful creation".to_string()),
-        })?;
+        let id = quota
+            .id
+            .clone()
+            .ok_or_else(|| ApplicationError::BusinessError {
+                message: "Failed to generate quota ID".to_string(),
+                code: Some("QUOTA_ID_GENERATION_FAILED".to_string()),
+                context: Some("Failed to generate quota ID after successful creation".to_string()),
+            })?;
         AiHubUserQuota::insert(pool!(), &quota).await?;
         Ok(id)
     }
 
     /// 更新配额
     pub async fn update_quota(&self, id: &str, dto: UpdateQuotaDTO) -> ApplicationResult<()> {
-        // 使用select_by_map替代select_by_id
-        let mut quota = AiHubUserQuota::select_by_map(
-            pool!(),
-            rbs::value! { "id": id }
-        ).await?
-        .first()
-        .cloned()
-        .ok_or_else(|| ApplicationError::NotFound {
-            message: "Quota not found".to_string(),
-            resource: Some("quota".to_string()),
-            id: Some(id.to_string()),
-        })?;
+        let mut quota = AiHubUserQuota::select_by_map(pool!(), rbs::value! { "id": id })
+            .await?
+            .first()
+            .cloned()
+            .ok_or_else(|| ApplicationError::NotFound {
+                message: "Quota not found".to_string(),
+                resource: Some("quota".to_string()),
+                id: Some(id.to_string()),
+            })?;
 
-        if let Some(total_quota) = dto.total_quota {
-            quota.total_quota = total_quota;
-            // 重新计算剩余额度
-            quota.remaining_quota = total_quota - quota.used_quota;
-        }
-        if let Some(used_quota) = dto.used_quota {
-            quota.used_quota = used_quota;
-            quota.remaining_quota = quota.total_quota - used_quota;
-        }
-        if let Some(remaining_quota) = dto.remaining_quota {
-            quota.remaining_quota = remaining_quota;
-            quota.used_quota = quota.total_quota - remaining_quota;
-        }
         if let Some(cycle_start) = &dto.cycle_start {
-            quota.period_start = Some(DateTime::from_str(cycle_start).map_err(|e| ApplicationError::ValidationError {
-                message: format!("Invalid cycle_start: {}", e),
-                field: Some("cycle_start".to_string()),
-                value: Some(cycle_start.clone()),
+            quota.period_start = Some(DateTime::from_str(cycle_start).map_err(|e| {
+                ApplicationError::ValidationError {
+                    message: format!("Invalid cycle_start: {}", e),
+                    field: Some("cycle_start".to_string()),
+                    value: Some(cycle_start.clone()),
+                }
             })?);
         }
         if let Some(cycle_end) = &dto.cycle_end {
-            quota.period_end = Some(DateTime::from_str(cycle_end).map_err(|e| ApplicationError::ValidationError {
-                message: format!("Invalid cycle_end: {}", e),
-                field: Some("cycle_end".to_string()),
-                value: Some(cycle_end.clone()),
+            quota.period_end = Some(DateTime::from_str(cycle_end).map_err(|e| {
+                ApplicationError::ValidationError {
+                    message: format!("Invalid cycle_end: {}", e),
+                    field: Some("cycle_end".to_string()),
+                    value: Some(cycle_end.clone()),
+                }
             })?);
         }
         if let Some(status) = dto.status {
@@ -125,226 +135,26 @@ impl QuotaService {
         }
 
         quota.updated_at = Some(DateTime::now());
-        // 使用update_by_map替代update_by_id
-        AiHubUserQuota::update_by_map(
-            pool!(),
-            &quota,
-            rbs::value! { "id": id }
-        ).await?;
-        Ok(())
-    }
-
-    /// 配额充值
-    pub async fn recharge(&self, id: &str, dto: RechargeQuotaDTO) -> ApplicationResult<()> {
-        // 使用select_by_map替代select_by_id
-        let mut quota = AiHubUserQuota::select_by_map(
-            pool!(),
-            rbs::value! { "id": id }
-        ).await?
-        .first()
-        .cloned()
-        .ok_or_else(|| ApplicationError::NotFound {
-            message: "Quota not found".to_string(),
-            resource: Some("quota".to_string()),
-            id: Some(id.to_string()),
-        })?;
-
-        // 原子操作：增加总额度和剩余额度
-        quota.total_quota += dto.amount;
-        quota.remaining_quota += dto.amount;
-        quota.updated_at = Some(DateTime::now());
-
-        // 使用update_by_map替代update_by_id
-        AiHubUserQuota::update_by_map(
-            pool!(),
-            &quota,
-            rbs::value! { "id": id }
-        ).await?;
-        
-        // TODO: 记录充值日志（需要创建日志表）
-        Ok(())
-    }
-
-    /// 配额扣减（原子操作）
-    pub async fn deduct(&self, id: &str, dto: DeductQuotaDTO) -> ApplicationResult<()> {
-        // 使用事务保证原子性
-        let mut tx = pool!().acquire_begin().await?;
-        
-        // 重新查询并锁定记录
-        let mut quota = match AiHubUserQuota::select_by_map(&mut tx, rbs::value! { "id": id }).await? {
-            mut qs if !qs.is_empty() => qs.remove(0),
-            _ => {
-                tx.rollback().await?;
-                return Err(ApplicationError::NotFound {
-                    message: "Quota not found".to_string(),
-                    resource: Some("quota".to_string()),
-                    id: Some(id.to_string()),
-                });
-            }
-        };
-
-        // 检查配额状态
-        if quota.status != Some("active".to_string()) {
-            tx.rollback().await?;
-            return Err(ApplicationError::QuotaExceeded {
-                message: "Quota is not active".to_string(),
-                user_id: Some(quota.user_id),
-                required: Some(dto.amount),
-                remaining: Some(quota.remaining_quota),
-            });
-        }
-
-        // 检查用户余额是否充足
-        let users = SysUser::select_by_map(&mut tx, rbs::value! { "id": &quota.user_id }).await?;
-        if users.is_empty() {
-            tx.rollback().await?;
-            return Err(ApplicationError::NotFound {
-                message: "User not found".to_string(),
-                resource: Some("user".to_string()),
-                id: Some(quota.user_id.clone()),
-            });
-        }
-        
-        let user_balance = users[0].balance.unwrap_or(0.0);
-        if user_balance < dto.amount {
-            tx.rollback().await?;
-            return Err(ApplicationError::BalanceExceeded {
-                message: format!("Insufficient balance: required {}, remaining {}", dto.amount, user_balance),
-                user_id: Some(quota.user_id),
-                required: Some(dto.amount),
-                remaining: Some(user_balance),
-            });
-        }
-
-        // 检查配额是否充足
-        if quota.remaining_quota < dto.amount {
-            tx.rollback().await?;
-            return Err(ApplicationError::QuotaExceeded {
-                message: format!("Insufficient quota: required {}, remaining {}", dto.amount, quota.remaining_quota),
-                user_id: Some(quota.user_id),
-                required: Some(dto.amount),
-                remaining: Some(quota.remaining_quota),
-            });
-        }
-
-        // 扣减配额
-        quota.used_quota += dto.amount;
-        quota.remaining_quota -= dto.amount;
-        quota.updated_at = Some(DateTime::now());
-
-        // 更新记录
-        match AiHubUserQuota::update_by_map(&mut tx, &quota, rbs::value! { "id": id }).await {
-            Ok(_) => {
-                tx.commit().await?;
-                Ok(())
-            }
-            Err(e) => {
-                tx.rollback().await?;
-                Err(ApplicationError::DatabaseError {
-                    message: e.to_string(),
-                    operation: Some("update".to_string()),
-                    table: Some("ai_hub_user_quota".to_string()),
-                })
-            }
-        }
-    }
-
-    /// 批量扣减配额
-    pub async fn deduct_batch(&self, user_id: &str, dtos: Vec<DeductQuotaDTO>) -> ApplicationResult<()> {
-        let total_amount: f64 = dtos.iter().map(|d| d.amount).sum();
-        
-        // 使用事务保证原子性
-        let mut tx = pool!().acquire_begin().await?;
-        
-        // 查询用户所有活跃配额
-        // 使用select_by_map替代select_by_wrapper
-        let mut quotas = AiHubUserQuota::select_by_map(
-            &mut tx,
-            rbs::value! {
-                "user_id": user_id,
-                "status": "active"
-            }
-        ).await?;
-
-        if quotas.is_empty() {
-            tx.rollback().await?;
-            return Err(ApplicationError::QuotaExceeded {
-                message: "No active quota found".to_string(),
-                user_id: Some(user_id.to_string()),
-                required: Some(total_amount),
-                remaining: Some(0.0),
-            });
-        }
-
-        // 按创建时间排序，优先使用较早的配额
-        quotas.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-
-        let mut remaining_to_deduct = total_amount;
-
-        for mut quota in quotas {
-            if remaining_to_deduct <= 0.0 {
-                break;
-            }
-
-            if quota.remaining_quota <= 0.0 {
-                continue;
-            }
-
-            // 使用手动比较替代min函数，因为f64没有实现Ord trait
-            let deduct_amount = if remaining_to_deduct < quota.remaining_quota {
-                remaining_to_deduct
-            } else {
-                quota.remaining_quota
-            };
-            
-            quota.used_quota += deduct_amount;
-            quota.remaining_quota -= deduct_amount;
-            quota.updated_at = Some(DateTime::now());
-
-            // 使用update_by_map替代update_by_id
-            AiHubUserQuota::update_by_map(
-                &mut tx,
-                &quota,
-                rbs::value! { "id": quota.id.clone().unwrap_or_default() }
-            ).await?;
-            
-            remaining_to_deduct -= deduct_amount;
-        }
-
-        if remaining_to_deduct > 0.0 {
-            tx.rollback().await?;
-            return Err(ApplicationError::QuotaExceeded {
-                message: format!("Insufficient total quota: required {}, remaining {}", total_amount, total_amount - remaining_to_deduct),
-                user_id: Some(user_id.to_string()),
-                required: Some(total_amount),
-                remaining: Some(total_amount - remaining_to_deduct),
-            });
-        }
-
-        tx.commit().await?;
+        AiHubUserQuota::update_by_map(pool!(), &quota, rbs::value! { "id": id }).await?;
         Ok(())
     }
 
     /// 查询配额详情
     pub async fn get_quota(&self, id: &str) -> ApplicationResult<AiHubUserQuotaVO> {
-        // 使用select_by_map替代select_by_id
-        let quota = AiHubUserQuota::select_by_map(
-            pool!(),
-            rbs::value! { "id": id }
-        ).await?
-        .first()
-        .cloned()
-        .ok_or_else(|| ApplicationError::NotFound {
-            message: "Quota not found".to_string(),
-            resource: Some("quota".to_string()),
-            id: Some(id.to_string()),
-        })?;
+        let quota = AiHubUserQuota::select_by_map(pool!(), rbs::value! { "id": id })
+            .await?
+            .first()
+            .cloned()
+            .ok_or_else(|| ApplicationError::NotFound {
+                message: "Quota not found".to_string(),
+                resource: Some("quota".to_string()),
+                id: Some(id.to_string()),
+            })?;
         Ok(self.to_vo(quota))
     }
 
     /// 查询用户配额列表
     pub async fn list_quotas(&self, query: QuotaQueryDTO) -> ApplicationResult<ListQuotasResponse> {
-        // 构建查询条件
         let mut map = rbs::value! {};
 
         if let Some(user_id) = query.user_id {
@@ -357,22 +167,19 @@ impl QuotaService {
             map["status"] = rbs::Value::String(status);
         }
 
-        // 使用select_by_map替代select_by_wrapper
         let mut quotas = AiHubUserQuota::select_by_map(pool!(), map).await?;
 
-        // 手动过滤过期配额
         if let Some(false) = query.include_expired {
             let now = DateTime::now();
-            quotas.retain(|q| q.period_end.is_none() || q.period_end.as_ref().map(|e| e.ge(&now)).unwrap_or(false));
+            quotas.retain(|q| {
+                q.period_end.is_none() || q.period_end.as_ref().map(|e| e.ge(&now)).unwrap_or(false)
+            });
         }
 
-        // 手动排序
         quotas.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-        // 计算总数
         let total = quotas.len() as i64;
 
-        // 手动分页
         let page = query.page.unwrap_or(1);
         let page_size = query.page_size.unwrap_or(10);
         let offset = ((page - 1) * page_size) as usize;
@@ -389,331 +196,537 @@ impl QuotaService {
 
     /// 查询配额概览
     pub async fn get_overview(&self, user_id: &str) -> ApplicationResult<QuotaOverviewVO> {
-        // 使用select_by_map替代select_by_wrapper
         let quotas = AiHubUserQuota::select_by_map(
             pool!(),
             rbs::value! {
                 "user_id": user_id,
                 "status": "active"
-            }
-        ).await?;
+            },
+        )
+        .await?;
 
-        let total_quota: f64 = quotas.iter().map(|q| q.total_quota).sum();
-        let used_quota: f64 = quotas.iter().map(|q| q.used_quota).sum();
-        let remaining_quota: f64 = quotas.iter().map(|q| q.remaining_quota).sum();
-        let overall_usage_rate = if total_quota > 0.0 {
-            (used_quota / total_quota) * 100.0
-        } else {
-            0.0
-        };
-
-        let quota_vos: Vec<AiHubUserQuotaVO> = quotas.iter().map(|q| self.to_vo(q.clone())).collect();
+        let quota_vos: Vec<AiHubUserQuotaVO> =
+            quotas.iter().map(|q| self.to_vo(q.clone())).collect();
 
         Ok(QuotaOverviewVO {
             user_id: user_id.to_string(),
-            total_quota,
-            used_quota,
-            remaining_quota,
-            overall_usage_rate,
             active_quota_count: quota_vos.len() as i32,
             quotas: quota_vos,
         })
     }
 
     /// 检查配额并获取警告信息
-    pub async fn check_quota_warning(&self, user_id: &str) -> ApplicationResult<Option<QuotaWarningVO>> {
-        // 使用select_by_map替代select_by_wrapper
+    pub async fn check_quota_warning(
+        &self,
+        user_id: &str,
+    ) -> ApplicationResult<Option<QuotaWarningVO>> {
         let quotas = AiHubUserQuota::select_by_map(
             pool!(),
             rbs::value! {
                 "user_id": user_id,
                 "status": "active"
-            }
-        ).await?;
+            },
+        )
+        .await?;
 
         for quota in quotas {
-            let usage_rate = if quota.total_quota > 0.0 {
-                (quota.used_quota / quota.total_quota) * 100.0
-            } else {
-                0.0
-            };
+            let rpm_usage_rate =
+                if let (Some(limit), Some(used)) = (quota.rpm_limit, quota.rpm_used) {
+                    if limit > 0 {
+                        (used as f64 / limit as f64) * 100.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
 
-            if let Some(threshold) = quota.warning_threshold {
-                if usage_rate >= threshold {
-                    let warning = QuotaWarningVO {
-                        user_id: user_id.to_string(),
-                        quota_id: quota.id.clone().unwrap_or_default(),
-                        quota_type: quota.quota_period.clone().unwrap_or_default(),
-                        current_usage_rate: usage_rate,
-                        warning_threshold: threshold,
-                        remaining_quota: quota.remaining_quota,
-                        warning_message: format!(
-                            "配额使用率已达到 {:.1}%，剩余额度: {:.2}，阈值: {:.1}%",
-                            usage_rate, quota.remaining_quota, threshold
-                        ),
-                    };
-                    return Ok(Some(warning));
-                }
+            let tpm_usage_rate =
+                if let (Some(limit), Some(used)) = (quota.tpm_limit, quota.tpm_used) {
+                    if limit > 0 {
+                        (used as f64 / limit as f64) * 100.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+            let max_usage_rate = rpm_usage_rate.max(tpm_usage_rate);
+
+            if let Some(threshold) = quota.warning_threshold
+                && max_usage_rate >= threshold
+            {
+                let warning = QuotaWarningVO {
+                    user_id: user_id.to_string(),
+                    quota_id: quota.id.clone().unwrap_or_default(),
+                    quota_type: quota.quota_period.clone().unwrap_or_default(),
+                    current_usage_rate: max_usage_rate,
+                    warning_threshold: threshold,
+                    warning_message: format!(
+                        "配额使用率已达到 {:.1}%，RPM使用率: {:.1}%，TPM使用率: {:.1}%，阈值: {:.1}%",
+                        max_usage_rate, rpm_usage_rate, tpm_usage_rate, threshold
+                    ),
+                };
+                return Ok(Some(warning));
             }
         }
 
         Ok(None)
     }
 
-    /// 分配配额
-    pub async fn allocate_quota(&self, dto: AllocateQuotaDTO) -> ApplicationResult<String> {
-        // 检查是否已存在同类型配额
-        let existing = AiHubUserQuota::select_by_map(
+    /// 检查配额是否充足（基于RPM/TPM）
+    pub async fn check_quota(
+        &self,
+        user_id: &str,
+        request_tokens: i32,
+    ) -> ApplicationResult<QuotaCheckResult> {
+        let quotas = AiHubUserQuota::select_by_map(
             pool!(),
             rbs::value! {
-                "user_id": &dto.user_id,
-                "quota_period": &dto.quota_type,
+                "user_id": user_id,
                 "status": "active"
-            }
-        ).await?;
+            },
+        )
+        .await?;
 
-        if !existing.is_empty() {
-            if let Some(true) = dto.overwrite {
-                // 保存第一个配额的ID
-                let first_quota_id = existing[0].id.clone().ok_or_else(|| ApplicationError::BusinessError {
-                    message: "Quota ID is missing".to_string(),
-                    code: Some("QUOTA_ID_MISSING".to_string()),
-                    context: Some("Failed to get quota ID during allocation overwrite".to_string()),
-                })?;
-                
-                // 覆盖现有配额
-                for quota in existing {
-                    let quota_id = quota.id.clone().ok_or_else(|| ApplicationError::BusinessError {
-                        message: "Quota ID is missing".to_string(),
-                        code: Some("QUOTA_ID_MISSING".to_string()),
-                        context: Some("Failed to get quota ID during allocation overwrite".to_string()),
-                    })?;
-                    self.update_quota(
-                        &quota_id,
-                        UpdateQuotaDTO {
-                            id: quota_id.clone(),
-                            total_quota: Some(dto.amount),
-                            used_quota: Some(0.0),
-                            remaining_quota: Some(dto.amount),
-                            cycle_start: None,
-                            cycle_end: None,
-                            status: Some("active".to_string()),
-                            warning_threshold: None,
-                        }
-                    ).await?;
-                }
-                return Ok(first_quota_id);
+        if quotas.is_empty() {
+            return Ok(QuotaCheckResult {
+                allowed: false,
+                rpm_remaining: 0,
+                tpm_remaining: 0,
+                warning: Some("No active quota found".to_string()),
+            });
+        }
+
+        let quota = &quotas[0];
+        let now = DateTime::now();
+
+        let mut rpm_remaining = 0i32;
+        let mut tpm_remaining = 0i32;
+        let mut warning = None;
+
+        if let (Some(rpm_limit), Some(rpm_used), Some(rpm_reset_time)) = (
+            quota.rpm_limit,
+            quota.rpm_used,
+            quota.rpm_reset_time.clone(),
+        ) {
+            let now_ts = now.unix_timestamp();
+            let reset_ts = rpm_reset_time.unix_timestamp();
+
+            if now_ts >= reset_ts {
+                rpm_remaining = rpm_limit;
             } else {
-                return Err(ApplicationError::QuotaExceeded {
-                    message: "Active quota already exists for this user and type".to_string(),
-                    user_id: Some(dto.user_id),
-                    required: Some(dto.amount),
-                    remaining: None,
+                rpm_remaining = (rpm_limit - rpm_used).max(0);
+            }
+
+            if rpm_remaining <= 0 {
+                return Ok(QuotaCheckResult {
+                    allowed: false,
+                    rpm_remaining: 0,
+                    tpm_remaining: 0,
+                    warning: Some("RPM limit exceeded".to_string()),
                 });
             }
         }
 
-        // 创建新配额
-        self.create_quota(CreateQuotaDTO {
-            user_id: dto.user_id,
-            quota_type: dto.quota_type,
-            total_quota: dto.amount,
-            cycle_start: None,
-            cycle_end: None,
-            warning_threshold: None,
-        }).await
-    }
+        if let (Some(tpm_limit), Some(tpm_used), Some(tpm_reset_time)) = (
+            quota.tpm_limit,
+            quota.tpm_used,
+            quota.tpm_reset_time.clone(),
+        ) {
+            let now_ts = now.unix_timestamp();
+            let reset_ts = tpm_reset_time.unix_timestamp();
 
-    /// 检查用户配额是否充足
-    pub async fn check_quota_sufficient(&self, user_id: &str, amount: f64) -> ApplicationResult<bool> {
-        let quotas = AiHubUserQuota::select_by_map(
-            pool!(),
-            rbs::value! {
-                "user_id": user_id,
-                "status": "active"
-            }
-        ).await?;
-
-        let total_remaining: f64 = quotas.iter().map(|q| q.remaining_quota).sum();
-        Ok(total_remaining >= amount)
-    }
-
-    /// 获取用户总配额信息
-    pub async fn get_user_quota_info(&self, user_id: &str) -> ApplicationResult<(f64, f64, f64)> {
-        let quotas = AiHubUserQuota::select_by_map(
-            pool!(),
-            rbs::value! {
-                "user_id": user_id,
-                "status": "active"
-            }
-        ).await?;
-
-        let total_quota: f64 = quotas.iter().map(|q| q.total_quota).sum();
-        let used_quota: f64 = quotas.iter().map(|q| q.used_quota).sum();
-        let remaining_quota: f64 = quotas.iter().map(|q| q.remaining_quota).sum();
-
-        Ok((total_quota, used_quota, remaining_quota))
-    }
-
-    /// 回滚配额扣减
-    ///
-    /// 用于在配额扣减后但后续操作失败时恢复配额
-    pub async fn rollback_deduct(&self, user_id: &str, amount: f64) -> ApplicationResult<()> {
-        // 使用事务保证原子性
-        let mut tx = pool!().acquire_begin().await?;
-        
-        // 查询用户所有活跃配额
-        let mut quotas = AiHubUserQuota::select_by_map(
-            &mut tx,
-            rbs::value! {
-                "user_id": user_id,
-                "status": "active"
-            }
-        ).await?;
-
-        if quotas.is_empty() {
-            tx.rollback().await?;
-            return Err(ApplicationError::QuotaExceeded {
-                message: "No active quota found for rollback".to_string(),
-                user_id: Some(user_id.to_string()),
-                required: Some(amount),
-                remaining: Some(0.0),
-            });
-        }
-
-        // 按创建时间排序，优先恢复较早的配额
-        quotas.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-
-        let mut remaining_to_restore = amount;
-
-        for mut quota in quotas {
-            if remaining_to_restore <= 0.0 {
-                break;
-            }
-
-            // 计算可恢复的额度（不能超过该配额的已用额度）
-            let restore_amount = if remaining_to_restore < quota.used_quota {
-                remaining_to_restore
+            if now_ts >= reset_ts {
+                tpm_remaining = tpm_limit;
             } else {
-                quota.used_quota
-            };
+                tpm_remaining = (tpm_limit - tpm_used).max(0);
+            }
 
-            // 恢复配额：增加剩余额度，减少已用额度
-            quota.remaining_quota += restore_amount;
-            quota.used_quota -= restore_amount;
-            quota.updated_at = Some(DateTime::now());
-
-            // 使用update_by_map替代update_by_id
-            AiHubUserQuota::update_by_map(
-                &mut tx,
-                &quota,
-                rbs::value! { "id": quota.id.clone().unwrap_or_default() }
-            ).await?;
-            
-            remaining_to_restore -= restore_amount;
+            if tpm_remaining < request_tokens {
+                return Ok(QuotaCheckResult {
+                    allowed: false,
+                    rpm_remaining,
+                    tpm_remaining,
+                    warning: Some(format!(
+                        "TPM limit exceeded: required {}, remaining {}",
+                        request_tokens, tpm_remaining
+                    )),
+                });
+            }
         }
 
-        if remaining_to_restore > 0.0 {
-            tx.rollback().await?;
-            return Err(ApplicationError::QuotaExceeded {
-                message: format!("Insufficient used quota to rollback: required {}, available {}", amount, amount - remaining_to_restore),
-                user_id: Some(user_id.to_string()),
-                required: Some(amount),
-                remaining: Some(amount - remaining_to_restore),
-            });
+        if let Some(threshold) = quota.warning_threshold {
+            let rpm_usage_rate =
+                if let (Some(limit), Some(used)) = (quota.rpm_limit, quota.rpm_used) {
+                    if limit > 0 {
+                        (used as f64 / limit as f64) * 100.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+            let tpm_usage_rate =
+                if let (Some(limit), Some(used)) = (quota.tpm_limit, quota.tpm_used) {
+                    if limit > 0 {
+                        (used as f64 / limit as f64) * 100.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+            let max_usage_rate = rpm_usage_rate.max(tpm_usage_rate);
+
+            if max_usage_rate >= threshold {
+                warning = Some(format!(
+                    "Quota usage rate: {:.1}%, RPM: {:.1}%, TPM: {:.1}%",
+                    max_usage_rate, rpm_usage_rate, tpm_usage_rate
+                ));
+            }
         }
 
-        tx.commit().await?;
-        log::info!("[QuotaService] Rollback successful: user_id={}, amount={}", user_id, amount);
-        Ok(())
+        Ok(QuotaCheckResult {
+            allowed: true,
+            rpm_remaining,
+            tpm_remaining,
+            warning,
+        })
     }
 
-    /// 批量扣减配额（在现有事务中执行）
-    ///
-    /// 在传入的事务对象中执行配额扣减，不提交事务
-    pub async fn deduct_batch_in_tx(
-        &self,
-        executor: &mut rbatis::executor::RBatisTxExecutor,
-        user_id: &str,
-        dtos: Vec<DeductQuotaDTO>,
-    ) -> ApplicationResult<()> {
-        let total_amount: f64 = dtos.iter().map(|d| d.amount).sum();
-
-        // 查询用户所有活跃配额
-        let mut quotas = AiHubUserQuota::select_by_map(
-            &mut *executor,
+    /// 检查RPM是否超限
+    pub async fn check_rpm(&self, user_id: &str) -> ApplicationResult<bool> {
+        let quotas = AiHubUserQuota::select_by_map(
+            pool!(),
             rbs::value! {
                 "user_id": user_id,
                 "status": "active"
-            }
-        ).await?;
+            },
+        )
+        .await?;
 
         if quotas.is_empty() {
-            return Err(ApplicationError::QuotaExceeded {
+            return Ok(false);
+        }
+
+        let quota = &quotas[0];
+        let now = DateTime::now();
+
+        if let (Some(rpm_limit), Some(rpm_used), Some(rpm_reset_time)) = (
+            quota.rpm_limit,
+            quota.rpm_used,
+            quota.rpm_reset_time.clone(),
+        ) {
+            let now_ts = now.unix_timestamp();
+            let reset_ts = rpm_reset_time.unix_timestamp();
+
+            if now_ts >= reset_ts {
+                return Ok(true);
+            }
+
+            return Ok(rpm_used < rpm_limit);
+        }
+
+        Ok(true)
+    }
+
+    /// 检查TPM是否超限
+    pub async fn check_tpm(&self, user_id: &str, request_tokens: i32) -> ApplicationResult<bool> {
+        let quotas = AiHubUserQuota::select_by_map(
+            pool!(),
+            rbs::value! {
+                "user_id": user_id,
+                "status": "active"
+            },
+        )
+        .await?;
+
+        if quotas.is_empty() {
+            return Ok(false);
+        }
+
+        let quota = &quotas[0];
+        let now = DateTime::now();
+
+        if let (Some(tpm_limit), Some(tpm_used), Some(tpm_reset_time)) = (
+            quota.tpm_limit,
+            quota.tpm_used,
+            quota.tpm_reset_time.clone(),
+        ) {
+            let now_ts = now.unix_timestamp();
+            let reset_ts = tpm_reset_time.unix_timestamp();
+
+            if now_ts >= reset_ts {
+                return Ok(true);
+            }
+
+            return Ok((tpm_used + request_tokens) <= tpm_limit);
+        }
+
+        Ok(true)
+    }
+
+    /// 记录配额使用（RPM和TPM）
+    pub async fn record_usage(&self, user_id: &str, request_tokens: i32) -> ApplicationResult<()> {
+        let mut quotas = AiHubUserQuota::select_by_map(
+            pool!(),
+            rbs::value! {
+                "user_id": user_id,
+                "status": "active"
+            },
+        )
+        .await?;
+
+        if quotas.is_empty() {
+            return Err(ApplicationError::NotFound {
                 message: "No active quota found".to_string(),
-                user_id: Some(user_id.to_string()),
-                required: Some(total_amount),
-                remaining: Some(0.0),
+                resource: Some("quota".to_string()),
+                id: Some(user_id.to_string()),
             });
         }
 
-        // 按创建时间排序，优先使用较早的配额
-        quotas.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        let mut quota = quotas.remove(0);
+        let now = DateTime::now();
 
-        let mut remaining_to_deduct = total_amount;
+        if quota.rpm_reset_time.is_some() {
+            let now_ts = now.unix_timestamp();
+            let reset_ts = quota
+                .rpm_reset_time
+                .as_ref()
+                .map(|dt| dt.unix_timestamp())
+                .unwrap_or(0);
 
-        for mut quota in quotas {
-            if remaining_to_deduct <= 0.0 {
-                break;
+            if now_ts >= reset_ts {
+                quota.rpm_used = Some(0);
+                quota.rpm_reset_time = Some(now.clone());
             }
-
-            if quota.remaining_quota <= 0.0 {
-                continue;
-            }
-
-            // 使用手动比较替代min函数，因为f64没有实现Ord trait
-            let deduct_amount = if remaining_to_deduct < quota.remaining_quota {
-                remaining_to_deduct
-            } else {
-                quota.remaining_quota
-            };
-
-            quota.used_quota += deduct_amount;
-            quota.remaining_quota -= deduct_amount;
-            quota.updated_at = Some(DateTime::now());
-
-            // 使用update_by_map替代update_by_id
-            AiHubUserQuota::update_by_map(
-                &mut *executor,
-                &quota,
-                rbs::value! { "id": quota.id.clone().unwrap_or_default() }
-            ).await?;
-
-            remaining_to_deduct -= deduct_amount;
         }
 
-        if remaining_to_deduct > 0.0 {
-            return Err(ApplicationError::QuotaExceeded {
-                message: format!("Insufficient total quota: required {}, remaining {}", total_amount, total_amount - remaining_to_deduct),
-                user_id: Some(user_id.to_string()),
-                required: Some(total_amount),
-                remaining: Some(total_amount - remaining_to_deduct),
-            });
+        if let Some(rpm_used) = quota.rpm_used {
+            quota.rpm_used = Some(rpm_used + 1);
         }
+
+        if quota.tpm_reset_time.is_some() {
+            let now_ts = now.unix_timestamp();
+            let reset_ts = quota
+                .tpm_reset_time
+                .as_ref()
+                .map(|dt| dt.unix_timestamp())
+                .unwrap_or(0);
+
+            if now_ts >= reset_ts {
+                quota.tpm_used = Some(0);
+                quota.tpm_reset_time = Some(now.clone());
+            }
+        }
+
+        if let Some(tpm_used) = quota.tpm_used {
+            quota.tpm_used = Some(tpm_used + request_tokens);
+        }
+
+        quota.last_used_at = Some(now.clone());
+        quota.updated_at = Some(now.clone());
+
+        AiHubUserQuota::update_by_map(
+            pool!(),
+            &quota,
+            rbs::value! { "id": quota.id.clone().unwrap_or_default() },
+        )
+        .await?;
 
         Ok(())
     }
 
-    /// 转换为VO
-    fn to_vo(&self, quota: AiHubUserQuota) -> AiHubUserQuotaVO {
-        let usage_rate = if quota.total_quota > 0.0 {
-            (quota.used_quota / quota.total_quota) * 100.0
-        } else {
-            0.0
+    /// 重置周期性配额（RPM/TPM计数器）
+    pub async fn reset_periodic_quota(&self, user_id: &str) -> ApplicationResult<()> {
+        let mut quotas = AiHubUserQuota::select_by_map(
+            pool!(),
+            rbs::value! {
+                "user_id": user_id,
+                "status": "active"
+            },
+        )
+        .await?;
+
+        if quotas.is_empty() {
+            return Err(ApplicationError::NotFound {
+                message: "No active quota found".to_string(),
+                resource: Some("quota".to_string()),
+                id: Some(user_id.to_string()),
+            });
+        }
+
+        let mut quota = quotas.remove(0);
+        let now = DateTime::now();
+
+        quota.rpm_used = Some(0);
+        quota.rpm_reset_time = Some(now.clone());
+        quota.tpm_used = Some(0);
+        quota.tpm_reset_time = Some(now.clone());
+        quota.updated_at = Some(now);
+
+        AiHubUserQuota::update_by_map(
+            pool!(),
+            &quota,
+            rbs::value! { "id": quota.id.clone().unwrap_or_default() },
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// 获取配额状态
+    pub async fn get_quota_status(&self, user_id: &str) -> ApplicationResult<AiHubUserQuotaVO> {
+        let quotas = AiHubUserQuota::select_by_map(
+            pool!(),
+            rbs::value! {
+                "user_id": user_id,
+                "status": "active"
+            },
+        )
+        .await?;
+
+        if quotas.is_empty() {
+            return Err(ApplicationError::NotFound {
+                message: "No active quota found".to_string(),
+                resource: Some("quota".to_string()),
+                id: Some(user_id.to_string()),
+            });
+        }
+
+        Ok(self.to_vo(quotas[0].clone()))
+    }
+
+    /// 更新配额配置
+    pub async fn update_quota_config(
+        &self,
+        user_id: &str,
+        rpm_limit: Option<i32>,
+        tpm_limit: Option<i32>,
+    ) -> ApplicationResult<()> {
+        let mut quotas = AiHubUserQuota::select_by_map(
+            pool!(),
+            rbs::value! {
+                "user_id": user_id,
+                "status": "active"
+            },
+        )
+        .await?;
+
+        if quotas.is_empty() {
+            return Err(ApplicationError::NotFound {
+                message: "No active quota found".to_string(),
+                resource: Some("quota".to_string()),
+                id: Some(user_id.to_string()),
+            });
+        }
+
+        let mut quota = quotas.remove(0);
+
+        if let Some(rpm_limit) = rpm_limit {
+            quota.rpm_limit = Some(rpm_limit);
+        }
+
+        if let Some(tpm_limit) = tpm_limit {
+            quota.tpm_limit = Some(tpm_limit);
+        }
+
+        quota.updated_at = Some(DateTime::now());
+
+        AiHubUserQuota::update_by_map(
+            pool!(),
+            &quota,
+            rbs::value! { "id": quota.id.clone().unwrap_or_default() },
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// 获取用户等级配置
+    pub async fn get_user_level_config(&self, user_id: &str) -> ApplicationResult<UserLevelConfig> {
+        let users = SysUser::select_by_map(pool!(), rbs::value! { "id": user_id }).await?;
+
+        if users.is_empty() {
+            return Err(ApplicationError::NotFound {
+                message: "User not found".to_string(),
+                resource: Some("user".to_string()),
+                id: Some(user_id.to_string()),
+            });
+        }
+
+        let user = &users[0];
+        let user_level = user.user_level.clone().unwrap_or_else(|| "L1".to_string());
+
+        let configs =
+            UserLevelConfig::select_by_map(pool!(), rbs::value! { "level": user_level.clone() })
+                .await?;
+
+        if configs.is_empty() {
+            return Err(ApplicationError::NotFound {
+                message: format!("User level config not found for level: {}", user_level),
+                resource: Some("user_level_config".to_string()),
+                id: Some(user_level.clone()),
+            });
+        }
+
+        Ok(configs[0].clone())
+    }
+
+    /// 基于用户等级创建配额
+    pub async fn create_quota_by_level(&self, user_id: &str) -> ApplicationResult<String> {
+        let level_config = self.get_user_level_config(user_id).await?;
+
+        let rpm_limit = Some(level_config.rpm_limit);
+        let tpm_limit = Some(level_config.tpm_limit);
+
+        let quota = AiHubUserQuota {
+            id: Some(ulid::Ulid::new().to_string()),
+            user_id: user_id.to_string(),
+            quota_period: Some("daily".to_string()),
+            period_start: Some(DateTime::now()),
+            period_end: None,
+            warning_threshold: Some(80.0),
+            critical_threshold: None,
+            status: Some("active".to_string()),
+            created_at: Some(DateTime::now()),
+            updated_at: Some(DateTime::now()),
+            last_used_at: None,
+            rpm_limit,
+            rpm_used: Some(0),
+            rpm_reset_time: Some(DateTime::now()),
+            tpm_limit,
+            tpm_used: Some(0),
+            tpm_reset_time: Some(DateTime::now()),
         };
 
-        let need_warning = if let Some(threshold) = quota.warning_threshold {
-            usage_rate >= threshold
+        let id = quota
+            .id
+            .clone()
+            .ok_or_else(|| ApplicationError::BusinessError {
+                message: "Failed to generate quota ID".to_string(),
+                code: Some("QUOTA_ID_GENERATION_FAILED".to_string()),
+                context: Some("Failed to generate quota ID after successful creation".to_string()),
+            })?;
+        AiHubUserQuota::insert(pool!(), &quota).await?;
+        Ok(id)
+    }
+
+    /// 将AiHubUserQuota转换为AiHubUserQuotaVO
+    fn to_vo(&self, quota: AiHubUserQuota) -> AiHubUserQuotaVO {
+        let need_warning = if let (Some(warning_threshold), Some(rpm_limit), Some(rpm_used)) =
+            (quota.warning_threshold, quota.rpm_limit, quota.rpm_used)
+        {
+            if rpm_limit > 0 {
+                let rpm_usage_rate = (rpm_used as f64 / rpm_limit as f64) * 100.0;
+                rpm_usage_rate >= warning_threshold
+            } else {
+                false
+            }
         } else {
             false
         };
@@ -721,17 +734,17 @@ impl QuotaService {
         AiHubUserQuotaVO {
             id: quota.id,
             user_id: quota.user_id,
-            quota_type: quota.quota_period.clone().unwrap_or_default(),
-            total_quota: quota.total_quota,
-            used_quota: quota.used_quota,
-            remaining_quota: quota.remaining_quota,
-            usage_rate,
-            cycle_start: quota.period_start.map(|t| t.to_string()),
-            cycle_end: quota.period_end.map(|t| t.to_string()),
-            status: quota.status.clone().unwrap_or_default(),
+            quota_type: quota.quota_period.unwrap_or_default(),
+            cycle_start: quota.period_start.map(|d| d.to_string()),
+            cycle_end: quota.period_end.map(|d| d.to_string()),
+            status: quota.status.unwrap_or_default(),
             warning_threshold: quota.warning_threshold,
             need_warning,
-            created_at: quota.created_at.map(|t| t.to_string()),
+            created_at: quota.created_at.map(|d| d.to_string()),
+            rpm_limit: quota.rpm_limit,
+            rpm_used: quota.rpm_used,
+            tpm_limit: quota.tpm_limit,
+            tpm_used: quota.tpm_used,
         }
     }
 }
