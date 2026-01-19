@@ -1,302 +1,282 @@
 {
-  // 用途：默认权限配置文件
-  // 说明：定义系统初始化时的默认权限列表
-
-  // 用途：权限类型定义
-  // 说明：menu-菜单权限，button-按钮权限，api-API权限
-  "permission_types": [
-    "menu",
-    "button",
-    "api"
+  default_permissions: [
+    {
+      name: "用户管理",
+      permission: "sys:user:view",
+      path: "/system/user",
+      permission_type: "menu",
+      description: "查看用户管理页面",
+      sort_order: 1,
+      icon: "user",
+      status: 1,
+    },
+    {
+      name: "用户添加",
+      permission: "sys:user:add",
+      path: "/admin/sys_user_add",
+      permission_type: "button",
+      description: "添加新用户",
+      sort_order: 1,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "用户编辑",
+      permission: "sys:user:edit",
+      path: "/admin/sys_user_update",
+      permission_type: "button",
+      description: "编辑用户信息",
+      sort_order: 2,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "用户删除",
+      permission: "sys:user:delete",
+      path: "/admin/sys_user_remove",
+      permission_type: "button",
+      description: "删除用户",
+      sort_order: 3,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "角色管理",
+      permission: "sys:role:view",
+      path: "/system/role",
+      permission_type: "menu",
+      description: "查看角色管理页面",
+      sort_order: 2,
+      icon: "role",
+      status: 1,
+    },
+    {
+      name: "角色添加",
+      permission: "sys:role:add",
+      path: "/admin/sys_role_add",
+      permission_type: "button",
+      description: "添加新角色",
+      sort_order: 1,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "角色编辑",
+      permission: "sys:role:edit",
+      path: "/admin/sys_role_update",
+      permission_type: "button",
+      description: "编辑角色信息",
+      sort_order: 2,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "角色删除",
+      permission: "sys:role:delete",
+      path: "/admin/sys_role_delete",
+      permission_type: "button",
+      description: "删除角色",
+      sort_order: 3,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "权限管理",
+      permission: "sys:permission:view",
+      path: "/system/permission",
+      permission_type: "menu",
+      description: "查看权限管理页面",
+      sort_order: 3,
+      icon: "permission",
+      status: 1,
+    },
+    {
+      name: "权限添加",
+      permission: "sys:permission:add",
+      path: "/admin/sys_permission_add",
+      permission_type: "button",
+      description: "添加新权限",
+      sort_order: 1,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "权限编辑",
+      permission: "sys:permission:edit",
+      path: "/admin/sys_permission_update",
+      permission_type: "button",
+      description: "编辑权限信息",
+      sort_order: 2,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "权限删除",
+      permission: "sys:permission:delete",
+      path: "/admin/sys_permission_remove",
+      permission_type: "button",
+      description: "删除权限",
+      sort_order: 3,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "字典管理",
+      permission: "sys:dict:view",
+      path: "/system/dict",
+      permission_type: "menu",
+      description: "查看字典管理页面",
+      sort_order: 4,
+      icon: "dict",
+      status: 1,
+    },
+    {
+      name: "字典添加",
+      permission: "sys:dict:add",
+      path: "/admin/sys_dict_add",
+      permission_type: "button",
+      description: "添加新字典",
+      sort_order: 1,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "字典编辑",
+      permission: "sys:dict:edit",
+      path: "/admin/sys_dict_update",
+      permission_type: "button",
+      description: "编辑字典信息",
+      sort_order: 2,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "字典删除",
+      permission: "sys:dict:delete",
+      path: "/admin/sys_dict_remove",
+      permission_type: "button",
+      description: "删除字典",
+      sort_order: 3,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "AI Hub",
+      permission: "ai:hub:view",
+      path: "/ai/hub",
+      permission_type: "menu",
+      description: "查看AI Hub页面",
+      sort_order: 10,
+      icon: "ai",
+      status: 1,
+    },
+    {
+      name: "模型管理",
+      permission: "sys:model:view",
+      path: "/ai/model",
+      permission_type: "menu",
+      description: "查看模型管理页面",
+      sort_order: 11,
+      icon: "model",
+      status: 1,
+    },
+    {
+      name: "模型编辑",
+      permission: "sys:model:edit",
+      path: "/admin/model_update",
+      permission_type: "button",
+      description: "编辑模型配置",
+      sort_order: 12,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "提供商编辑",
+      permission: "sys:provider:edit",
+      path: "/admin/provider_update",
+      permission_type: "button",
+      description: "编辑提供商配置",
+      sort_order: 13,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "用量统计",
+      permission: "ai:usage:view",
+      path: "/ai/usage",
+      permission_type: "menu",
+      description: "查看用量统计页面",
+      sort_order: 12,
+      icon: "usage",
+      status: 1,
+    },
+    {
+      name: "管理员统计",
+      permission: "admin:stats:view",
+      path: "/admin/stats",
+      permission_type: "menu",
+      description: "查看管理员统计页面",
+      sort_order: 13,
+      icon: "stats",
+      status: 1,
+    },
+    {
+      name: "刷新统计",
+      permission: "admin:stats:refresh",
+      path: "/admin/stats/refresh",
+      permission_type: "button",
+      description: "手动刷新统计数据",
+      sort_order: 14,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "用户管理",
+      permission: "manage_users",
+      path: "/admin/sys_user",
+      permission_type: "button",
+      description: "管理用户",
+      sort_order: 20,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "配额管理",
+      permission: "manage_quotas",
+      path: "/admin/quota",
+      permission_type: "button",
+      description: "管理配额",
+      sort_order: 21,
+      icon: null,
+      status: 1,
+    },
+    {
+      name: "余额管理",
+      permission: "manage_balance",
+      path: "/admin/balance",
+      permission_type: "button",
+      description: "管理余额",
+      sort_order: 22,
+      icon: null,
+      status: 1,
+    },
   ],
-
-  // 用途：默认权限列表
-  // 说明：系统启动时自动创建的默认权限
-  "default_permissions": [
+  default_roles: [
     {
-      // 用途：权限名称
-      // 说明：用户管理菜单
-      "name": "用户管理",
-      // 用途：权限标识
-      // 说明：用于权限验证的唯一标识
-      "permission": "sys:user:view",
-      // 用途：权限路径
-      // 说明：前端路由路径
-      "path": "/system/user",
-      // 用途：权限类型
-      // 说明：菜单权限
-      "permission_type": "menu",
-      // 用途：权限描述
-      // 说明：查看用户管理页面
-      "description": "查看用户管理页面",
-      // 用途：排序字段
-      // 说明：用于菜单排序
-      "sort_order": 1,
-      // 用途：前端图标
-      // 说明：菜单图标
-      "icon": "user",
-      // 用途：状态
-      // 说明：1-启用，0-禁用
-      "status": 1
+      name: "admin",
+      description: "管理员角色，拥有所有权限",
+      permissions: [
+        "*",
+      ],
     },
     {
-      "name": "用户添加",
-      "permission": "sys:user:add",
-      "path": "/admin/sys_user_add",
-      "permission_type": "button",
-      "description": "添加新用户",
-      "sort_order": 1,
-      "status": 1
+      name: "user",
+      description: "普通用户角色，拥有基础权限",
+      permissions: [
+        "ai:hub:view",
+        "ai:model:view",
+        "ai:usage:view",
+      ],
     },
-    {
-      "name": "用户编辑",
-      "permission": "sys:user:edit",
-      "path": "/admin/sys_user_update",
-      "permission_type": "button",
-      "description": "编辑用户信息",
-      "sort_order": 2,
-      "status": 1
-    },
-    {
-      "name": "用户删除",
-      "permission": "sys:user:delete",
-      "path": "/admin/sys_user_remove",
-      "permission_type": "button",
-      "description": "删除用户",
-      "sort_order": 3,
-      "status": 1
-    },
-    {
-      "name": "角色管理",
-      "permission": "sys:role:view",
-      "path": "/system/role",
-      "permission_type": "menu",
-      "description": "查看角色管理页面",
-      "sort_order": 2,
-      "icon": "role",
-      "status": 1
-    },
-    {
-      "name": "角色添加",
-      "permission": "sys:role:add",
-      "path": "/admin/sys_role_add",
-      "permission_type": "button",
-      "description": "添加新角色",
-      "sort_order": 1,
-      "status": 1
-    },
-    {
-      "name": "角色编辑",
-      "permission": "sys:role:edit",
-      "path": "/admin/sys_role_update",
-      "permission_type": "button",
-      "description": "编辑角色信息",
-      "sort_order": 2,
-      "status": 1
-    },
-    {
-      "name": "角色删除",
-      "permission": "sys:role:delete",
-      "path": "/admin/sys_role_delete",
-      "permission_type": "button",
-      "description": "删除角色",
-      "sort_order": 3,
-      "status": 1
-    },
-    {
-      "name": "权限管理",
-      "permission": "sys:permission:view",
-      "path": "/system/permission",
-      "permission_type": "menu",
-      "description": "查看权限管理页面",
-      "sort_order": 3,
-      "icon": "permission",
-      "status": 1
-    },
-    {
-      "name": "权限添加",
-      "permission": "sys:permission:add",
-      "path": "/admin/sys_permission_add",
-      "permission_type": "button",
-      "description": "添加新权限",
-      "sort_order": 1,
-      "status": 1
-    },
-    {
-      "name": "权限编辑",
-      "permission": "sys:permission:edit",
-      "path": "/admin/sys_permission_update",
-      "permission_type": "button",
-      "description": "编辑权限信息",
-      "sort_order": 2,
-      "status": 1
-    },
-    {
-      "name": "权限删除",
-      "permission": "sys:permission:delete",
-      "path": "/admin/sys_permission_remove",
-      "permission_type": "button",
-      "description": "删除权限",
-      "sort_order": 3,
-      "status": 1
-    },
-    {
-      "name": "字典管理",
-      "permission": "sys:dict:view",
-      "path": "/system/dict",
-      "permission_type": "menu",
-      "description": "查看字典管理页面",
-      "sort_order": 4,
-      "icon": "dict",
-      "status": 1
-    },
-    {
-      "name": "字典添加",
-      "permission": "sys:dict:add",
-      "path": "/admin/sys_dict_add",
-      "permission_type": "button",
-      "description": "添加新字典",
-      "sort_order": 1,
-      "status": 1
-    },
-    {
-      "name": "字典编辑",
-      "permission": "sys:dict:edit",
-      "path": "/admin/sys_dict_update",
-      "permission_type": "button",
-      "description": "编辑字典信息",
-      "sort_order": 2,
-      "status": 1
-    },
-    {
-      "name": "字典删除",
-      "permission": "sys:dict:delete",
-      "path": "/admin/sys_dict_remove",
-      "permission_type": "button",
-      "description": "删除字典",
-      "sort_order": 3,
-      "status": 1
-    },
-    {
-      "name": "AI Hub",
-      "permission": "ai:hub:view",
-      "path": "/ai/hub",
-      "permission_type": "menu",
-      "description": "查看AI Hub页面",
-      "sort_order": 10,
-      "icon": "ai",
-      "status": 1
-    },
-    {
-      "name": "模型管理",
-      "permission": "ai:model:view",
-      "path": "/ai/model",
-      "permission_type": "menu",
-      "description": "查看模型管理页面",
-      "sort_order": 11,
-      "icon": "model",
-      "status": 1
-    },
-    {
-      "name": "模型编辑",
-      "permission": "sys:model:edit",
-      "path": "/admin/model_update",
-      "permission_type": "button",
-      "description": "编辑模型配置",
-      "sort_order": 12,
-      "status": 1
-    },
-    {
-      "name": "提供商编辑",
-      "permission": "sys:provider:edit",
-      "path": "/admin/provider_update",
-      "permission_type": "button",
-      "description": "编辑提供商配置",
-      "sort_order": 13,
-      "status": 1
-    },
-    {
-      "name": "用量统计",
-      "permission": "ai:usage:view",
-      "path": "/ai/usage",
-      "permission_type": "menu",
-      "description": "查看用量统计页面",
-      "sort_order": 12,
-      "icon": "usage",
-      "status": 1
-    },
-    {
-      "name": "管理员统计",
-      "permission": "admin:stats:view",
-      "path": "/admin/stats",
-      "permission_type": "menu",
-      "description": "查看管理员统计页面",
-      "sort_order": 13,
-      "icon": "stats",
-      "status": 1
-    },
-    {
-      "name": "刷新统计",
-      "permission": "admin:stats:refresh",
-      "path": "/admin/stats/refresh",
-      "permission_type": "button",
-      "description": "手动刷新统计数据",
-      "sort_order": 14,
-      "status": 1
-    },
-    {
-      "name": "用户管理",
-      "permission": "manage_users",
-      "path": "/admin/sys_user",
-      "permission_type": "button",
-      "description": "管理用户",
-      "sort_order": 20,
-      "status": 1
-    },
-    {
-      "name": "配额管理",
-      "permission": "manage_quotas",
-      "path": "/admin/quota",
-      "permission_type": "button",
-      "description": "管理配额",
-      "sort_order": 21,
-      "status": 1
-    },
-    {
-      "name": "余额管理",
-      "permission": "manage_balance",
-      "path": "/admin/balance",
-      "permission_type": "button",
-      "description": "管理余额",
-      "sort_order": 22,
-      "status": 1
-    }
   ],
-
-  // 用途：默认角色列表
-  // 说明：系统启动时自动创建的默认角色
-  "default_roles": [
-    {
-      // 用途：角色名称
-      // 说明：管理员角色
-      "name": "admin",
-      // 用途：角色描述
-      // 说明：管理员角色，拥有所有权限
-      "description": "管理员角色，拥有所有权限",
-      // 用途：权限列表
-      // 说明：* 表示所有权限
-      "permissions": ["*"]
-    },
-    {
-      // 用途：角色名称
-      // 说明：普通用户角色
-      "name": "user",
-      // 用途：角色描述
-      // 说明：普通用户角色，拥有基础权限
-      "description": "普通用户角色，拥有基础权限",
-      // 用途：权限列表
-      // 说明：普通用户只能访问AI相关功能
-      "permissions": ["ai:hub:view", "ai:model:view", "ai:usage:view"]
-    }
-  ]
 }

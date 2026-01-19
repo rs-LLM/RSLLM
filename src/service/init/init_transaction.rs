@@ -409,7 +409,7 @@ impl InitTransactionManager {
     async fn restore_config_static(backup_config: &str) -> Result<(), String> {
         info!("[InitTransaction] 恢复配置文件");
 
-        std::fs::write("application.json5", backup_config)
+        std::fs::write("config/application.json5", backup_config)
             .map_err(|e| format!("恢复配置文件失败: {}", e))?;
 
         Ok(())

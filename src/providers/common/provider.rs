@@ -317,16 +317,8 @@ impl Provider for CommonProvider {
                                     if let Some(data) = line.strip_prefix("data: ") {
                                         // 去掉 "data: " 前缀
                                         if data == "[DONE]" {
-                                            // 流结束，返回一个空的 chunk 表示结束
-                                            chunks.push(Ok(crate::domain::dto::ai_hub::streaming::ChatCompletionChunk {
-                                                id: String::new(),
-                                                object: Some("chat.completion.chunk".to_string()),
-                                                created: 0,
-                                                model: String::new(),
-                                                choices: vec![],
-                                                system_fingerprint: None,
-                                                extra_fields: serde_json::Value::default(),
-                                            }));
+                                            // 流结束
+                                            continue;
                                         } else {
                                             // 解析 JSON
                                             if let Ok(chunk) = serde_json::from_str::<crate::domain::dto::ai_hub::streaming::ChatCompletionChunk>(data) {
@@ -348,7 +340,10 @@ impl Provider for CommonProvider {
                                                         // 检查是否有tool_calls
                                                         let has_tool_calls = delta.tool_calls.as_ref().map_or(false, |calls| !calls.is_empty());
                                                         
-                                                        has_content || has_reasoning || has_extra_fields || has_tool_calls
+                                                        // 检查role是否非空（OpenAI兼容性：初始chunk可能只有role字段）
+                                                        let has_role = delta.role.as_ref().map_or(false, |s| !s.is_empty());
+                                                        
+                                                        has_content || has_reasoning || has_extra_fields || has_tool_calls || has_role
                                                     } else {
                                                         false
                                                     }

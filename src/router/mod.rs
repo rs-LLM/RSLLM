@@ -28,8 +28,12 @@ pub use user_level_model_rate_limit_router::create_user_level_model_rate_limit_r
 pub use user_level_router::create_user_level_router;
 
 use crate::context::ServiceContext;
-use axum::Router;
+use axum::{body::Body, extract::Request, response::{IntoResponse, Response}, Router};
+use include_dir::{include_dir, Dir};
 use std::sync::Arc;
+
+// 嵌入 dist 目录到二进制文件中
+static DIST_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/dist");
 
 /// 创建完整的应用路由
 ///
@@ -51,13 +55,9 @@ pub fn create_app_router(state: Arc<ServiceContext>) -> Router<()> {
         // 添加统一前缀的路由
         .nest(
             "/rsllm/api",
-            create_resource_router().with_state(state.clone()),
+            create_init_router().with_state(state.clone()),
         )
-        .nest("/rsllm/api", create_init_router().with_state(state.clone()))
-        .nest(
-            "/rsllm/api",
-            create_no_auth_router().with_state(state.clone()),
-        )
+        .nest("/rsllm/api", create_no_auth_router().with_state(state.clone()))
         .nest("/rsllm/api", create_auth_router().with_state(state.clone()))
         .nest(
             "/rsllm/api",
@@ -79,5 +79,54 @@ pub fn create_app_router(state: Arc<ServiceContext>) -> Router<()> {
             "/rsllm/api",
             create_user_level_model_rate_limit_router().with_state(state.clone()),
         )
+        .nest(
+            "/rsllm/api",
+            create_resource_router().with_state(state.clone()),
+        )
         .with_state(state)
+        .fallback_service(axum::routing::get(serve_static_root))
+}
+
+/// 服务根路径静态文件
+async fn serve_static_root(req: Request) -> Response {
+    let path = req.uri().path();
+    let path = path.trim_start_matches('/');
+
+    if path.is_empty() || path == "/" {
+        return serve_file_root("index.html");
+    }
+
+    if let Some(file) = DIST_DIR.get_file(path) {
+        let contents = file.contents();
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        Response::builder()
+            .header("content-type", mime.essence_str())
+            .body(Body::from(contents.to_vec()))
+            .unwrap()
+            .into_response()
+    } else {
+        Response::builder()
+            .status(404)
+            .body(Body::empty())
+            .unwrap()
+            .into_response()
+    }
+}
+
+/// 服务单个文件
+fn serve_file_root(path: &str) -> Response {
+    if let Some(file) = DIST_DIR.get_file(path) {
+        let contents = file.contents();
+        Response::builder()
+            .header("content-type", "text/html")
+            .body(Body::from(contents.to_vec()))
+            .unwrap()
+            .into_response()
+    } else {
+        Response::builder()
+            .status(404)
+            .body(Body::empty())
+            .unwrap()
+            .into_response()
+    }
 }

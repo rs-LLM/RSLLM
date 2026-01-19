@@ -182,7 +182,6 @@ impl UserStatsService {
 
         // 按时间分组统计
         let mut tokens_by_time: HashMap<String, UserTrendDataPointVO> = HashMap::new();
-        let mut cost_by_time: HashMap<String, f64> = HashMap::new();
 
         for log in &usage_logs {
             if let Some(created_at) = &log.created_at {
@@ -203,18 +202,15 @@ impl UserStatsService {
                 entry.output_tokens += log.output_tokens;
                 entry.total_tokens += log.total_tokens;
                 entry.cost += log.total_cost;
-
-                // 累加消费数据
-                *cost_by_time.entry(time_key).or_insert(0.0) += log.total_cost;
             }
         }
 
-        // 转换为趋势数据点
-        let mut token_trend: Vec<UserTrendDataPointVO> = tokens_by_time.values().cloned().collect();
-        token_trend.sort_by(|a, b| a.label.cmp(&b.label));
+        // 生成完整的时间键列表
+        let time_keys = self.generate_time_keys(&dimension);
 
-        let mut cost_trend: Vec<UserTrendDataPointVO> = tokens_by_time.values().cloned().collect();
-        cost_trend.sort_by(|a, b| a.label.cmp(&b.label));
+        // 填充缺失的数据点
+        let token_trend = self.fill_missing_data_points(time_keys.clone(), &tokens_by_time);
+        let cost_trend = self.fill_missing_data_points(time_keys, &tokens_by_time);
 
         Ok(UserTrendStatsVO {
             user_id: user_id.to_string(),
@@ -231,23 +227,87 @@ impl UserStatsService {
 
         let start_time = match dimension {
             TimeDimension::Day => {
-                // 1天前
-                let start_timestamp = now.unix_timestamp() as i64 - (24 * 60 * 60);
-                DateTime::from_timestamp(start_timestamp)
-            }
-            TimeDimension::Week => {
-                // 7天前
+                // 7天前（一周七天）
                 let start_timestamp = now.unix_timestamp() as i64 - (7 * 24 * 60 * 60);
                 DateTime::from_timestamp(start_timestamp)
             }
+            TimeDimension::Week => {
+                // 28天前（4周）
+                let start_timestamp = now.unix_timestamp() as i64 - (28 * 24 * 60 * 60);
+                DateTime::from_timestamp(start_timestamp)
+            }
             TimeDimension::Month => {
-                // 30天前
-                let start_timestamp = now.unix_timestamp() as i64 - (30 * 24 * 60 * 60);
+                // 90天前（3个月）
+                let start_timestamp = now.unix_timestamp() as i64 - (90 * 24 * 60 * 60);
                 DateTime::from_timestamp(start_timestamp)
             }
         };
 
         Ok((start_time, now))
+    }
+
+    /// 生成完整的时间键列表
+    fn generate_time_keys(&self, dimension: &TimeDimension) -> Vec<String> {
+        let now = DateTime::now();
+        let mut time_keys = Vec::new();
+
+        match dimension {
+            TimeDimension::Day => {
+                // 生成最近7天的日期
+                for i in 0..7 {
+                    let timestamp = now.unix_timestamp() as i64 - (i * 24 * 60 * 60);
+                    let dt = DateTime::from_timestamp(timestamp);
+                    let dt_str = dt.to_string();
+                    let date_key = dt_str[..10].to_string(); // YYYY-MM-DD
+                    time_keys.push(date_key);
+                }
+                time_keys.reverse(); // 从早到晚排序
+            }
+            TimeDimension::Week => {
+                // 生成最近4周的数据（按天分组，共28天）
+                for i in 0..28 {
+                    let timestamp = now.unix_timestamp() as i64 - (i * 24 * 60 * 60);
+                    let dt = DateTime::from_timestamp(timestamp);
+                    let dt_str = dt.to_string();
+                    let date_key = dt_str[..10].to_string(); // YYYY-MM-DD
+                    time_keys.push(date_key);
+                }
+                time_keys.reverse(); // 从早到晚排序
+            }
+            TimeDimension::Month => {
+                // 生成最近3个月的数据
+                for i in 0..3 {
+                    let timestamp = now.unix_timestamp() as i64 - (i * 30 * 24 * 60 * 60);
+                    let dt = DateTime::from_timestamp(timestamp);
+                    let dt_str = dt.to_string();
+                    let month_key = dt_str[..7].to_string(); // YYYY-MM
+                    time_keys.push(month_key);
+                }
+                time_keys.reverse(); // 从早到晚排序
+            }
+        }
+
+        time_keys
+    }
+
+    /// 填充缺失的数据点
+    fn fill_missing_data_points(
+        &self,
+        time_keys: Vec<String>,
+        data_map: &HashMap<String, UserTrendDataPointVO>,
+    ) -> Vec<UserTrendDataPointVO> {
+        time_keys
+            .into_iter()
+            .map(|key| {
+                data_map.get(&key).cloned().unwrap_or(UserTrendDataPointVO {
+                    label: key.clone(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    total_tokens: 0,
+                    cost: 0.0,
+                })
+            })
+            .collect()
     }
 
     /// 获取时间键

@@ -8,7 +8,6 @@ use crate::service::{
     BillingService, // 计费服务
     CacheService,   // 缓存服务
     // AI Hub 服务
-    PriceRuleService,              // 价格规则服务
     QuotaService,                  // 配额管理服务
     RbacPermissionAuditLogService, // 权限审计日志服务
     RbacPermissionService,         // 权限服务
@@ -106,8 +105,6 @@ pub struct ServiceContext {
     // 说明：处理回收站相关的业务逻辑
 
     // AI Hub 服务
-    pub price_rule_service: PriceRuleService, // 用途：价格规则服务
-    // 说明：处理价格规则相关业务逻辑
     pub quota_service: QuotaService, // 用途：配额管理服务
     // 说明：处理用户配额相关业务逻辑
     pub billing_service: BillingService, // 用途：计费服务
@@ -163,7 +160,6 @@ impl Clone for ServiceContext {
             sys_organization_service: self.sys_organization_service.clone(),
             sys_auth_service: self.sys_auth_service.clone(),
             sys_trash_service: self.sys_trash_service.clone(),
-            price_rule_service: self.price_rule_service.clone(),
             quota_service: self.quota_service.clone(),
             billing_service: self.billing_service.clone(),
             user_level_service: self.user_level_service.clone(),
@@ -447,10 +443,6 @@ impl Default for ServiceContext {
             // 说明：创建回收站服务实例，用于处理回收站相关业务
             sys_trash_service: SysTrashService::new(),
 
-            // 用途：初始化价格规则服务
-            // 说明：创建价格规则服务实例，用于处理价格规则相关业务
-            price_rule_service: PriceRuleService {},
-
             // 用途：初始化配额管理服务
             // 说明：创建配额管理服务实例，用于处理用户配额相关业务
             quota_service: QuotaService {},
@@ -459,7 +451,6 @@ impl Default for ServiceContext {
             // 说明：创建计费服务实例，用于处理费用计算和配额检查
             billing_service: BillingService {
                 quota_service: QuotaService {},
-                price_rule_service: PriceRuleService {},
             },
 
             // 用途：初始化用户等级服务

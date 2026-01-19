@@ -35,7 +35,7 @@ pub const MIN_N: u32 = 1;
 
 /// 嵌入输入验证常量
 pub const MAX_EMBEDDING_INPUTS: usize = 2048;
-pub const MAX_TEXT_LENGTH: usize = 10000;
+pub const MAX_TEXT_LENGTH: usize = 64000;
 
 /// 聊天补全请求参数
 pub struct ChatCompletionRequestParams<'a> {
@@ -139,6 +139,65 @@ impl Validator {
                                 }
                                 if text.len() > MAX_TEXT_LENGTH {
                                     return Err(format!("消息{}的文本内容过长", i));
+                                }
+                            }
+                        }
+                    }
+                },
+                None => {
+                    return Err(format!("消息{}的内容不能为空", i));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 验证消息列表（支持动态长度限制）
+    ///
+    /// # 规则
+    /// - 不为空
+    /// - 数量不超过限制
+    /// - 每条消息都有有效的角色和内容
+    /// - 内容长度不超过指定的 max_length
+    pub fn validate_messages_with_limit(
+        messages: &[super::content::ChatCompletionMessage],
+        max_length: usize,
+    ) -> ValidationResult<()> {
+        if messages.is_empty() {
+            return Err("消息列表不能为空".to_string());
+        }
+
+        if messages.len() > MAX_MESSAGES {
+            return Err(format!("消息数量不能超过{}", MAX_MESSAGES));
+        }
+
+        for (i, message) in messages.iter().enumerate() {
+            if message.role.trim().is_empty() {
+                return Err(format!("消息{}的角色不能为空", i));
+            }
+
+            match &message.content {
+                Some(content) => match content {
+                    super::content::ChatMessageContent::String(s) => {
+                        if s.trim().is_empty() {
+                            return Err(format!("消息{}的内容不能为空", i));
+                        }
+                        if s.len() > max_length {
+                            return Err(format!("消息{}的内容过长（最大{}字符）", i, max_length));
+                        }
+                    }
+                    super::content::ChatMessageContent::Array(parts) => {
+                        if parts.is_empty() {
+                            return Err(format!("消息{}的内容不能为空", i));
+                        }
+                        for part in parts {
+                            if let Some(text) = &part.text {
+                                if text.trim().is_empty() {
+                                    return Err(format!("消息{}的文本内容不能为空", i));
+                                }
+                                if text.len() > max_length {
+                                    return Err(format!("消息{}的文本内容过长（最大{}字符）", i, max_length));
                                 }
                             }
                         }

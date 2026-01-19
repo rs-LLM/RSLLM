@@ -294,18 +294,18 @@ impl AdminStatsService {
 
         let start_time = match dimension {
             TimeDimension::Day => {
-                // 1天前
-                let start_timestamp = now.unix_timestamp() as i64 - (24 * 60 * 60);
-                DateTime::from_timestamp(start_timestamp)
-            }
-            TimeDimension::Week => {
-                // 7天前
+                // 7天前（一周七天）
                 let start_timestamp = now.unix_timestamp() as i64 - (7 * 24 * 60 * 60);
                 DateTime::from_timestamp(start_timestamp)
             }
+            TimeDimension::Week => {
+                // 28天前（4周）
+                let start_timestamp = now.unix_timestamp() as i64 - (28 * 24 * 60 * 60);
+                DateTime::from_timestamp(start_timestamp)
+            }
             TimeDimension::Month => {
-                // 30天前
-                let start_timestamp = now.unix_timestamp() as i64 - (30 * 24 * 60 * 60);
+                // 90天前（3个月）
+                let start_timestamp = now.unix_timestamp() as i64 - (90 * 24 * 60 * 60);
                 DateTime::from_timestamp(start_timestamp)
             }
         };

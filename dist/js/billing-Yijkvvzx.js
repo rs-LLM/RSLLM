@@ -1,0 +1,1 @@
+import{r as a}from"./bootstrap-0R127YJy.js";const r={getBalance:t=>a.post("/rsllm/api/balance/get",t),recharge:t=>a.post("/rsllm/api/balance/recharge",t),deduct:t=>a.post("/rsllm/api/balance/deduct",t),setBalance:t=>a.post("/rsllm/api/balance/set",t)},s={list:t=>a.post("/rsllm/api/transaction/list",t)};export{r as b,s as t};

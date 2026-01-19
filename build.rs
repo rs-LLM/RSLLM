@@ -15,7 +15,7 @@ pub struct ApplicationConfig {
 
 /// write `rbdc_<database>::Driver{}` to file 'target/driver.rs'
 fn main() {
-    let js_data = include_str!("application.json5");
+    let js_data = include_str!("config/application.json5");
     let config: ApplicationConfig = json5::from_str(js_data).expect("load config file fail");
     let mut data = String::new();
     let mut f = OpenOptions::new()

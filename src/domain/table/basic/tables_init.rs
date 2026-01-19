@@ -44,14 +44,14 @@ use rbatis::table_sync::{
 use rbs::value;
 // 用途：导入序列化相关
 // 说明：用于解析配置文件
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 // 用途：导入ULID类型
 // 说明：用于生成唯一标识符
 use ulid::Ulid;
 
 // 用途：权限配置结构体
 // 说明：用于从配置文件解析权限数据
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PermissionConfig {
     // 用途：默认权限列表
     // 说明：系统启动时自动创建的默认权限
@@ -65,7 +65,7 @@ struct PermissionConfig {
 
 // 用途：角色项结构体
 // 说明：单个角色的配置信息
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct RoleItem {
     // 用途：角色名称
     name: String,
@@ -81,7 +81,7 @@ struct RoleItem {
 
 // 用途：权限项结构体
 // 说明：单个权限的配置信息
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PermissionItem {
     // 用途：权限名称
     name: String,
@@ -407,29 +407,320 @@ pub async fn sys_sync_tables_data(rb: &RBatis) {
 }
 
 // 用途：加载权限配置文件
-// 说明：从config/default_permissions.json5读取权限配置
+// 说明：从config/default_permissions.json5读取权限配置，如果不存在则创建
 fn load_permission_config() -> PermissionConfig {
     // 用途：读取配置文件内容
     // 说明：从默认路径读取权限配置
     let config_path = "config/default_permissions.json5";
-    let config_content = std::fs::read_to_string(config_path).unwrap_or_else(|_| {
-        // 用途：配置文件读取失败时返回空配置
-        // 说明：确保系统在配置文件缺失时仍能启动
-        eprintln!("警告：无法读取权限配置文件 {}，将使用空配置", config_path);
-        "{}".to_string()
-    });
+    
+    if !std::path::Path::new(config_path).exists() {
+        let default_config = get_default_permission_config();
+        let config_str = json5::to_string(&default_config).expect("serialize permission config fail");
+        std::fs::create_dir_all("config").unwrap_or_else(|e| {
+            eprintln!("警告：创建config目录失败: {}", e);
+        });
+        std::fs::write(config_path, config_str).unwrap_or_else(|e| {
+            eprintln!("警告：写入权限配置文件失败: {}", e);
+        });
+        eprintln!("信息：已创建默认权限配置文件 {}", config_path);
+        default_config
+    } else {
+        let config_content = std::fs::read_to_string(config_path).unwrap_or_else(|_| {
+            eprintln!("警告：无法读取权限配置文件 {}，将使用空配置", config_path);
+            "{}".to_string()
+        });
 
-    // 用途：解析JSON5配置
-    // 说明：将JSON5字符串解析为配置结构体
-    let config: PermissionConfig = json5::from_str(&config_content).unwrap_or_else(|e| {
-        // 用途：配置解析失败时返回空配置
-        // 说明：确保系统在配置文件格式错误时仍能启动
-        eprintln!("警告：解析权限配置文件失败: {}，将使用空配置", e);
-        PermissionConfig {
-            default_permissions: vec![],
-            default_roles: vec![],
-        }
-    });
+        let config: PermissionConfig = json5::from_str(&config_content).unwrap_or_else(|e| {
+            eprintln!("警告：解析权限配置文件失败: {}，将使用空配置", e);
+            PermissionConfig {
+                default_permissions: vec![],
+                default_roles: vec![],
+            }
+        });
 
-    config
+        config
+    }
+}
+
+fn get_default_permission_config() -> PermissionConfig {
+    PermissionConfig {
+        default_permissions: vec![
+            PermissionItem {
+                name: "用户管理".to_string(),
+                permission: "sys:user:view".to_string(),
+                path: Some("/system/user".to_string()),
+                permission_type: Some("menu".to_string()),
+                description: Some("查看用户管理页面".to_string()),
+                sort_order: Some(1),
+                icon: Some("user".to_string()),
+                status: 1,
+            },
+            PermissionItem {
+                name: "用户添加".to_string(),
+                permission: "sys:user:add".to_string(),
+                path: Some("/admin/sys_user_add".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("添加新用户".to_string()),
+                sort_order: Some(1),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "用户编辑".to_string(),
+                permission: "sys:user:edit".to_string(),
+                path: Some("/admin/sys_user_update".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("编辑用户信息".to_string()),
+                sort_order: Some(2),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "用户删除".to_string(),
+                permission: "sys:user:delete".to_string(),
+                path: Some("/admin/sys_user_remove".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("删除用户".to_string()),
+                sort_order: Some(3),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "角色管理".to_string(),
+                permission: "sys:role:view".to_string(),
+                path: Some("/system/role".to_string()),
+                permission_type: Some("menu".to_string()),
+                description: Some("查看角色管理页面".to_string()),
+                sort_order: Some(2),
+                icon: Some("role".to_string()),
+                status: 1,
+            },
+            PermissionItem {
+                name: "角色添加".to_string(),
+                permission: "sys:role:add".to_string(),
+                path: Some("/admin/sys_role_add".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("添加新角色".to_string()),
+                sort_order: Some(1),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "角色编辑".to_string(),
+                permission: "sys:role:edit".to_string(),
+                path: Some("/admin/sys_role_update".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("编辑角色信息".to_string()),
+                sort_order: Some(2),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "角色删除".to_string(),
+                permission: "sys:role:delete".to_string(),
+                path: Some("/admin/sys_role_delete".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("删除角色".to_string()),
+                sort_order: Some(3),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "权限管理".to_string(),
+                permission: "sys:permission:view".to_string(),
+                path: Some("/system/permission".to_string()),
+                permission_type: Some("menu".to_string()),
+                description: Some("查看权限管理页面".to_string()),
+                sort_order: Some(3),
+                icon: Some("permission".to_string()),
+                status: 1,
+            },
+            PermissionItem {
+                name: "权限添加".to_string(),
+                permission: "sys:permission:add".to_string(),
+                path: Some("/admin/sys_permission_add".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("添加新权限".to_string()),
+                sort_order: Some(1),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "权限编辑".to_string(),
+                permission: "sys:permission:edit".to_string(),
+                path: Some("/admin/sys_permission_update".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("编辑权限信息".to_string()),
+                sort_order: Some(2),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "权限删除".to_string(),
+                permission: "sys:permission:delete".to_string(),
+                path: Some("/admin/sys_permission_remove".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("删除权限".to_string()),
+                sort_order: Some(3),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "字典管理".to_string(),
+                permission: "sys:dict:view".to_string(),
+                path: Some("/system/dict".to_string()),
+                permission_type: Some("menu".to_string()),
+                description: Some("查看字典管理页面".to_string()),
+                sort_order: Some(4),
+                icon: Some("dict".to_string()),
+                status: 1,
+            },
+            PermissionItem {
+                name: "字典添加".to_string(),
+                permission: "sys:dict:add".to_string(),
+                path: Some("/admin/sys_dict_add".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("添加新字典".to_string()),
+                sort_order: Some(1),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "字典编辑".to_string(),
+                permission: "sys:dict:edit".to_string(),
+                path: Some("/admin/sys_dict_update".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("编辑字典信息".to_string()),
+                sort_order: Some(2),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "字典删除".to_string(),
+                permission: "sys:dict:delete".to_string(),
+                path: Some("/admin/sys_dict_remove".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("删除字典".to_string()),
+                sort_order: Some(3),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "AI Hub".to_string(),
+                permission: "ai:hub:view".to_string(),
+                path: Some("/ai/hub".to_string()),
+                permission_type: Some("menu".to_string()),
+                description: Some("查看AI Hub页面".to_string()),
+                sort_order: Some(10),
+                icon: Some("ai".to_string()),
+                status: 1,
+            },
+            PermissionItem {
+                name: "模型管理".to_string(),
+                permission: "sys:model:view".to_string(),
+                path: Some("/ai/model".to_string()),
+                permission_type: Some("menu".to_string()),
+                description: Some("查看模型管理页面".to_string()),
+                sort_order: Some(11),
+                icon: Some("model".to_string()),
+                status: 1,
+            },
+            PermissionItem {
+                name: "模型编辑".to_string(),
+                permission: "sys:model:edit".to_string(),
+                path: Some("/admin/model_update".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("编辑模型配置".to_string()),
+                sort_order: Some(12),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "提供商编辑".to_string(),
+                permission: "sys:provider:edit".to_string(),
+                path: Some("/admin/provider_update".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("编辑提供商配置".to_string()),
+                sort_order: Some(13),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "用量统计".to_string(),
+                permission: "ai:usage:view".to_string(),
+                path: Some("/ai/usage".to_string()),
+                permission_type: Some("menu".to_string()),
+                description: Some("查看用量统计页面".to_string()),
+                sort_order: Some(12),
+                icon: Some("usage".to_string()),
+                status: 1,
+            },
+            PermissionItem {
+                name: "管理员统计".to_string(),
+                permission: "admin:stats:view".to_string(),
+                path: Some("/admin/stats".to_string()),
+                permission_type: Some("menu".to_string()),
+                description: Some("查看管理员统计页面".to_string()),
+                sort_order: Some(13),
+                icon: Some("stats".to_string()),
+                status: 1,
+            },
+            PermissionItem {
+                name: "刷新统计".to_string(),
+                permission: "admin:stats:refresh".to_string(),
+                path: Some("/admin/stats/refresh".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("手动刷新统计数据".to_string()),
+                sort_order: Some(14),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "用户管理".to_string(),
+                permission: "manage_users".to_string(),
+                path: Some("/admin/sys_user".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("管理用户".to_string()),
+                sort_order: Some(20),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "配额管理".to_string(),
+                permission: "manage_quotas".to_string(),
+                path: Some("/admin/quota".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("管理配额".to_string()),
+                sort_order: Some(21),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "余额管理".to_string(),
+                permission: "manage_balance".to_string(),
+                path: Some("/admin/balance".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("管理余额".to_string()),
+                sort_order: Some(22),
+                icon: None,
+                status: 1,
+            },
+        ],
+        default_roles: vec![
+            RoleItem {
+                name: "admin".to_string(),
+                description: Some("管理员角色，拥有所有权限".to_string()),
+                permissions: vec!["*".to_string()],
+            },
+            RoleItem {
+                name: "user".to_string(),
+                description: Some("普通用户角色，拥有基础权限".to_string()),
+                permissions: vec![
+                    "ai:hub:view".to_string(),
+                    "ai:model:view".to_string(),
+                    "ai:usage:view".to_string(),
+                ],
+            },
+        ],
+    }
 }

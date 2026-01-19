@@ -56,7 +56,6 @@ pub struct ListUsageLogsParams<'a> {
 #[derive(Clone)]
 pub struct BillingService {
     pub quota_service: crate::service::ai_hub::QuotaService,
-    pub price_rule_service: crate::service::ai_hub::PriceRuleService,
 }
 
 impl BillingService {
@@ -67,38 +66,13 @@ impl BillingService {
         &self,
         params: &CalculateAndCheckParams<'a>,
     ) -> ApplicationResult<CalculatedFee> {
-        // 获取用户等级（用于价格规则匹配）
-        let user_level = self.get_user_level(params.user_id).await?;
+        // 计算输入费用（基础价格 * 输入token数量 / 1000）
+        let input_cost = params.base_input_price * params.input_tokens as f64 / 1000.0;
 
-        // 计算输入费用
-        let input_calc = self
-            .price_rule_service
-            .calculate_price(crate::domain::dto::PriceCalculationDTO {
-                base_price: params.base_input_price,
-                input_tokens: params.input_tokens,
-                output_tokens: 0,
-                user_level: Some(user_level.clone()),
-                total_usage: None,
-                apply_rules: Some(true),
-            })
-            .await?;
+        // 计算输出费用（基础价格 * 输出token数量 / 1000）
+        let output_cost = params.base_output_price * params.output_tokens as f64 / 1000.0;
 
-        // 计算输出费用
-        let output_calc = self
-            .price_rule_service
-            .calculate_price(crate::domain::dto::PriceCalculationDTO {
-                base_price: params.base_output_price,
-                input_tokens: 0,
-                output_tokens: params.output_tokens,
-                user_level: Some(user_level.clone()),
-                total_usage: None,
-                apply_rules: Some(true),
-            })
-            .await?;
-
-        // 计算总费用（分）
-        let input_cost = input_calc.total_amount;
-        let output_cost = output_calc.total_amount;
+        // 计算总费用
         let total_cost = input_cost + output_cost;
 
         Ok(CalculatedFee {
@@ -111,8 +85,8 @@ impl BillingService {
             input_cost,
             output_cost,
             total_cost,
-            input_calculation: input_calc,
-            output_calculation: output_calc,
+            input_price: params.base_input_price,
+            output_price: params.base_output_price,
         })
     }
 
@@ -158,8 +132,8 @@ impl BillingService {
             input_tokens: fee.input_tokens,
             output_tokens: 0,
             total_tokens: fee.input_tokens,
-            input_price: fee.input_calculation.final_price,
-            output_price: fee.output_calculation.final_price,
+            input_price: fee.input_price,
+            output_price: fee.output_price,
             input_cost: Some(fee.input_cost),
             output_cost: Some(0.0),
             total_cost: fee.input_cost,
@@ -379,16 +353,39 @@ impl BillingService {
                 id: Some(fee.user_id.clone()),
             })?;
 
+        let balance_before = user.balance.unwrap_or(0.0);
+        let balance_after = balance_before + fee.input_cost;
+        
         let mut updated_user = user.clone();
-        updated_user.balance = user.balance.map(|b| b + fee.total_cost);
+        updated_user.balance = Some(balance_after);
         SysUser::update_by_map(&tx, &updated_user, rbs::value! {"id": &fee.user_id}).await?;
+
+        // 创建回滚交易记录
+        let now = DateTime::now();
+        let transaction_id = ulid::Ulid::new().to_string();
+        let transaction = Transaction {
+            id: Some(transaction_id.clone()),
+            user_id: fee.user_id.clone(),
+            type_: "recharge".to_string(),
+            amount: fee.input_cost,
+            balance_before,
+            balance_after,
+            operator_id: None,
+            reason: format!(
+                "AI服务调用失败回滚: model={}, input_tokens={}, output_tokens={}",
+                fee.model_id, fee.input_tokens, fee.output_tokens
+            ),
+            created_at: Some(now),
+        };
+        Transaction::insert(&tx, &transaction).await?;
 
         tx.commit().await?;
 
         log::info!(
-            "[BillingService] Pre-consumption rolled back successfully: user_id={}, amount={}",
+            "[BillingService] Pre-consumption rolled back successfully: user_id={}, amount={}, transaction_id={}",
             fee.user_id,
-            fee.total_cost
+            fee.input_cost,
+            transaction_id
         );
         Ok(())
     }
@@ -424,16 +421,36 @@ impl BillingService {
         user.balance = Some(balance_after);
         SysUser::update_by_map(&tx, &user, rbs::value! { "id": &fee.user_id }).await?;
 
+        // 创建预扣减交易记录
+        let now = DateTime::now();
+        let transaction_id = ulid::Ulid::new().to_string();
+        let transaction = Transaction {
+            id: Some(transaction_id.clone()),
+            user_id: fee.user_id.clone(),
+            type_: "deduct".to_string(),
+            amount: fee.input_cost,
+            balance_before,
+            balance_after,
+            operator_id: None,
+            reason: format!(
+                "AI服务调用预扣减: model={}, input_tokens={}",
+                fee.model_id, fee.input_tokens
+            ),
+            created_at: Some(now),
+        };
+        Transaction::insert(&tx, &transaction).await?;
+
         tx.commit().await?;
 
         let log_id = ulid::Ulid::new().to_string();
         log::info!(
-            "[BillingService] Pre-deduct successful: user_id={}, log_id={}, input_cost={:.2}, balance_before={:.2}, balance_after={:.2}",
+            "[BillingService] Pre-deduct successful: user_id={}, log_id={}, input_cost={:.2}, balance_before={:.2}, balance_after={:.2}, transaction_id={}",
             fee.user_id,
             log_id,
             fee.input_cost,
             balance_before,
-            balance_after
+            balance_after,
+            transaction_id
         );
         Ok(log_id)
     }
@@ -560,13 +577,6 @@ impl BillingService {
         Ok(())
     }
 
-    /// 获取用户等级
-    async fn get_user_level(&self, _user_id: &str) -> ApplicationResult<String> {
-        // TODO: 从用户服务获取用户等级
-        // 这里简化处理，返回默认等级
-        Ok("standard".to_string())
-    }
-
     /// 转换为用量记录VO
     fn to_usage_log_vo(&self, log: AiHubUsageLog) -> AiHubUsageLogVO {
         let provider_id = log
@@ -625,6 +635,6 @@ pub struct CalculatedFee {
     pub input_cost: f64,
     pub output_cost: f64,
     pub total_cost: f64,
-    pub input_calculation: crate::domain::vo::PriceCalculationVO,
-    pub output_calculation: crate::domain::vo::PriceCalculationVO,
+    pub input_price: f64,
+    pub output_price: f64,
 }

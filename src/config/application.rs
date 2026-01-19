@@ -63,26 +63,82 @@ pub struct ApplicationConfig {
 /// 说明：提供默认的配置加载方式
 impl Default for ApplicationConfig {
     fn default() -> Self {
-        // 用途：打开配置文件
-        // 说明：从application.json5文件中加载配置
-        let mut f = File::open("application.json5").expect("not find 'application.json5'");
-        // 用途：创建空字符串用于存储配置数据
-        // 说明：准备存储从文件中读取的配置内容
-        let mut cfg_data = "".to_string();
-        // 用途：从文件中读取配置数据到字符串
-        // 说明：将文件内容转换为字符串以便解析
-        f.read_to_string(&mut cfg_data)
-            .expect("read 'application.json5' fail");
-        // 用途：解析配置数据
-        // 说明：将JSON5格式的配置转换为ApplicationConfig结构体
-        let mut result: ApplicationConfig =
-            json5::from_str(&cfg_data).expect("load config file fail");
-        // 用途：初始化配置信息
-        // 说明：处理配置中的错误信息映射
-        result.init_infos();
-        // 用途：返回初始化后的配置
-        // 说明：提供完整的配置对象给调用者
-        result
+        let config_dir = "config";
+        let config_path = format!("{}/application.json5", config_dir);
+        
+        if std::path::Path::new(&config_path).exists() {
+            let mut f = File::open(&config_path).expect(&format!("not find '{}'", config_path));
+            let mut cfg_data = "".to_string();
+            f.read_to_string(&mut cfg_data)
+                .expect(&format!("read '{}' fail", config_path));
+            let mut result: ApplicationConfig =
+                json5::from_str(&cfg_data).expect("load config file fail");
+            result.init_infos();
+            result
+        } else {
+            let default_config = Self::get_default_config();
+            let config_str = json5::to_string(&default_config).expect("serialize config fail");
+            std::fs::create_dir_all(config_dir).unwrap_or_else(|e| {
+                eprintln!("警告：创建{}目录失败: {}", config_dir, e);
+            });
+            std::fs::write(&config_path, config_str).expect(&format!("write config file fail: {}", config_path));
+            eprintln!("信息：已创建默认配置文件 {}", config_path);
+            default_config
+        }
+    }
+}
+
+impl ApplicationConfig {
+    fn get_default_config() -> Self {
+        let mut errors = HashMap::new();
+        errors.insert("-1".to_string(), "未知错误".to_string());
+        errors.insert("access_denied".to_string(), "无权限访问".to_string());
+        errors.insert("access_token_empty".to_string(), "令牌不能为空".to_string());
+        errors.insert("account_disabled".to_string(), "账户被禁用".to_string());
+        errors.insert("account_empty".to_string(), "账户不能为空".to_string());
+        errors.insert("account_not_exists".to_string(), "账号不存在".to_string());
+        errors.insert("arg.name_empty".to_string(), "权限名字不能为空".to_string());
+        errors.insert("arg.permission_empty".to_string(), "权限不能为空".to_string());
+        errors.insert("cannot_disable_admin".to_string(), "不能禁用超级管理员".to_string());
+        errors.insert("dict_exists".to_string(), "字典已存在".to_string());
+        errors.insert("empty".to_string(), "缺少参数".to_string());
+        errors.insert("id_empty".to_string(), "id不能为空".to_string());
+        errors.insert("password_empty".to_string(), "密码为空".to_string());
+        errors.insert("password_error".to_string(), "密码不正确".to_string());
+        errors.insert("permission_exists".to_string(), "权限已存在".to_string());
+        errors.insert("please_send_code".to_string(), "请发送验证码".to_string());
+        errors.insert("req_frequently".to_string(), "操作过于频繁,请等待{}秒后重试".to_string());
+        errors.insert("role_id_empty".to_string(), "角色id不能为空".to_string());
+        errors.insert("role_user_cannot_empty".to_string(), "添加角色时用户和角色不能为空".to_string());
+        errors.insert("user_and_name_cannot_empty".to_string(), "用户名和姓名不能为空".to_string());
+        errors.insert("user_cannot_find".to_string(), "找不到用户".to_string());
+        errors.insert("user_not_exists".to_string(), "用户不存在".to_string());
+        errors.insert("vcode_error".to_string(), "验证码不正确".to_string());
+
+        Self {
+            server_url: "http://0.0.0.0:8000".to_string(),
+            db_url: "sqlite://rsllm.db".to_string(),
+            db_pool_len: 10,
+            db_pool_timeout: 30,
+            log_dir: "target/logs/".to_string(),
+            log_rolling: "day".to_string(),
+            log_pack_compress: "".to_string(),
+            log_keep_type: "KeepNum(120)".to_string(),
+            log_level: "debug".to_string(),
+            log_chan_len: Some(100000),
+            sms_cache_send_key_prefix: "sms:send:".to_string(),
+            jwt_secret: "".to_string(),
+            jwt_exp: 86400,
+            jwt_refresh_token: 604800,
+            cache: "mem".to_string(),
+            storage: "local".to_string(),
+            login_fail_retry: 3,
+            login_fail_retry_wait_sec: 30,
+            trash_recycle_days: 90,
+            datetime_format: "YYYY-MM-DD hh:mm:ss".to_string(),
+            errors,
+            error_infos: HashMap::new(),
+        }
     }
 }
 

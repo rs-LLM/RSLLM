@@ -10,11 +10,32 @@ use ulid::Ulid;
 use crate::context::ServiceContext;
 use crate::domain::dto::embeddings::EmbeddingsRequest;
 use crate::domain::dto::validation::Validator;
+use crate::domain::table::ai_hub::model_base::ModelBase;
+use crate::domain::table::ai_hub::model_provider_mapping::ModelProviderMapping;
 use crate::domain::vo::embeddings::{Embedding, Embeddings, EmbeddingsResponse};
 use crate::domain::vo::response::ApiResponse;
 use crate::domain::vo::usage::EmbeddingUsage;
 use crate::service::ai_hub::rate_limit_service::RateLimitCheckResult;
 use crate::service::{Content, TokenCounter};
+
+/// 检测错误是否为429 Too Many Requests
+fn is_rate_limit_error(error: &str) -> bool {
+    error.contains("429") || 
+    error.contains("Too Many Requests") ||
+    error.contains("1302") ||
+    error.contains("并发数过高")
+}
+
+/// 获取模型的所有可用映射（按priority降序）
+async fn get_all_mappings(
+    model_id: &str,
+    provider_id: &str,
+) -> std::result::Result<Vec<ModelProviderMapping>, String> {
+    let rb = crate::pool!();
+    ModelProviderMapping::select_by_model_and_provider_all(rb, model_id, provider_id)
+        .await
+        .map_err(|e| format!("Failed to query mappings: {}", e))
+}
 
 /// 嵌入生成接口
 ///
@@ -309,55 +330,112 @@ async fn get_pricing(
     }
 }
 
+/// 调用AI Provider获取真实响应（支持降级）
+async fn call_provider_with_fallback(
+    state: &Arc<ServiceContext>,
+    req: &EmbeddingsRequest,
+    _user_id: &str,
+) -> std::result::Result<EmbeddingsResponse, String> {
+    let model_router = &state.model_router;
+
+    let (provider_config, model_info) = model_router
+        .route(&req.model, true)
+        .await
+        .map_err(|e| format!("Failed to route model: {}", e))?;
+
+    let rb = crate::pool!();
+
+    let model_base = ModelBase::select_by_model_code(rb, &model_info.model_base.model_code)
+        .await
+        .map_err(|e| format!("Failed to query model_base: {}", e))?
+        .ok_or_else(|| {
+            format!(
+                "Model '{}' not found in model_base",
+                model_info.model_base.model_code
+            )
+        })?;
+
+    let model_id = model_base.id.ok_or_else(|| "Model ID not found".to_string())?;
+    let provider_id = provider_config.id.as_str();
+
+    let mappings = get_all_mappings(&model_id, provider_id).await?;
+
+    if mappings.is_empty() {
+        return Err("No mappings found for this model".to_string());
+    }
+
+    let mut last_error = String::new();
+
+    for (index, mapping) in mappings.iter().enumerate() {
+        log::info!(
+            "[AI Hub] Trying mapping {}/{}: provider_model_name={}, priority={:?}",
+            index + 1,
+            mappings.len(),
+            mapping.provider_model_name,
+            mapping.priority
+        );
+
+        let provider_registry = state.provider_registry.read().await;
+
+        let provider = match provider_registry.get_provider(&provider_config.provider_code) {
+            Some(p) => p,
+            None => {
+                last_error = format!(
+                    "Provider not found for provider_code: {}",
+                    provider_config.provider_code
+                );
+                log::warn!("[AI Hub] {}", last_error);
+                continue;
+            }
+        };
+
+        let provider_req = crate::domain::dto::embeddings::EmbeddingsRequest {
+            model: mapping.provider_model_name.clone(),
+            input: req.input.clone(),
+            encoding_format: req.encoding_format.clone(),
+            user: req.user.clone(),
+        };
+
+        match provider
+            .embeddings(provider_req, &serde_json::json!({}))
+            .await
+        {
+            Ok(response) => {
+                log::info!(
+                    "[AI Hub] Successfully called provider with mapping {}/{}",
+                    index + 1,
+                    mappings.len()
+                );
+                return convert_from_provider_response(response);
+            }
+            Err(e) => {
+                last_error = format!("Provider error: {}", e);
+                log::error!("[AI Hub] Mapping {}/{} failed: {}", index + 1, mappings.len(), last_error);
+
+                if is_rate_limit_error(&last_error) {
+                    log::info!("[AI Hub] Rate limit error detected, trying next mapping...");
+                    continue;
+                } else {
+                    return Err(last_error);
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "All {} mappings failed. Last error: {}",
+        mappings.len(),
+        last_error
+    ))
+}
+
 /// 调用AI Provider获取真实响应
 async fn call_provider(
     state: &Arc<ServiceContext>,
     req: &EmbeddingsRequest,
     _user_id: &str,
 ) -> std::result::Result<EmbeddingsResponse, String> {
-    // 1. 使用ModelRouter解析模型标识符并路由到对应的provider和model
-    let model_router = &state.model_router;
-
-    // 解析模型标识符格式: "provider_code/model_code"
-    let (provider_config, model_info) = model_router
-        .route(&req.model, true)
-        .await
-        .map_err(|e| format!("Failed to route model: {}", e))?;
-
-    log::info!(
-        "[AI Hub] Routed to provider: {}, model: {}",
-        provider_config.provider_code,
-        model_info.model_base.model_code
-    );
-
-    // 2. 从ProviderRegistry获取Provider实例
-    let provider_registry = state.provider_registry.read().await;
-
-    let provider = provider_registry
-        .get_provider(&provider_config.provider_code)
-        .ok_or_else(|| {
-            format!(
-                "Provider not found for provider_code: {}",
-                provider_config.provider_code
-            )
-        })?;
-
-    // 3. 转换请求类型
-    let provider_req = crate::domain::dto::embeddings::EmbeddingsRequest {
-        model: req.model.clone(),
-        input: req.input.clone(),
-        encoding_format: req.encoding_format.clone(),
-        user: req.user.clone(),
-    };
-
-    // 4. 调用Provider的embeddings方法
-    let response = provider
-        .embeddings(provider_req, &serde_json::json!({}))
-        .await
-        .map_err(|e| format!("Provider error: {}", e))?;
-
-    // 5. 转换响应类型
-    convert_from_provider_response(response)
+    call_provider_with_fallback(state, req, _user_id).await
 }
 
 /// 转换从Provider响应类型

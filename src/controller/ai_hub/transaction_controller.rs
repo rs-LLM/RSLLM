@@ -42,10 +42,9 @@ pub async fn list(
     let current_user_id = jwt_auth.id.clone();
     let has_manage_balance = jwt_auth.permissions.contains(&"manage_balance".to_string());
 
-    let transactions = transaction_service
+    let (transactions, total) = transaction_service
         .list_transaction(req, current_user_id, has_manage_balance)
         .await?;
-    let total = transactions.len();
 
     Ok(Json(ApiResponse::success(TransactionListResponse {
         transactions,

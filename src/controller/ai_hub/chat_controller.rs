@@ -19,7 +19,7 @@ use ulid::Ulid;
 
 // 导入相关类型
 use crate::context::ServiceContext;
-use crate::domain::dto::ai_hub::streaming::{ChatCompletionChunk, ChatCompletionChunkChoice};
+use crate::domain::dto::ai_hub::streaming::{ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta};
 use crate::domain::dto::ai_hub::validation::ChatCompletionRequestParams;
 use crate::domain::dto::chat::ChatCompletionRequest;
 use crate::domain::dto::content::{
@@ -34,7 +34,6 @@ use crate::domain::vo::response::ApiResponse;
 use crate::domain::vo::usage::Usage;
 use crate::service::BillingService;
 use crate::service::CalculatedFee;
-use crate::service::PriceRuleService;
 use crate::service::ai_hub::rate_limit_service::RateLimitCheckResult;
 use crate::service::{Content, TokenCountMeta, TokenCounter};
 
@@ -79,11 +78,39 @@ async fn handle_non_streaming_response(
                     rollback_err
                 );
             }
-            return Json(ApiResponse::<()>::error(
-                "500",
-                &format!("AI service call failed: {}", e),
-            ))
-            .into_response();
+            
+            // 返回符合OpenAI规范的错误响应
+            let error_response = crate::domain::vo::ai_hub::chat::ChatCompletion {
+                id: ulid::Ulid::new().to_string(),
+                object: Some("chat.completion".to_string()),
+                created: Some(std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()),
+                model: req.model.clone(),
+                choices: vec![crate::domain::vo::ai_hub::chat::ChatCompletionChoice {
+                    index: 0,
+                    message: crate::domain::dto::ai_hub::content::ChatCompletionMessage {
+                        role: "assistant".to_string(),
+                        content: Some(crate::domain::dto::ai_hub::content::ChatMessageContent::String(format!("Error: {}", e))),
+                        name: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                        refusal: None,
+                        reasoning_content: None,
+                        extra_fields: serde_json::Value::default(),
+                    },
+                    finish_reason: Some("error".to_string()),
+                    logprobs: None,
+                }],
+                usage: crate::domain::vo::ai_hub::usage::Usage {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                },
+                system_fingerprint: None,
+            };
+            return Json(error_response).into_response();
         }
     };
 
@@ -226,8 +253,8 @@ async fn handle_non_streaming_response(
             &api_key,
             fee.input_tokens,
             output_tokens,
-            fee.input_calculation.final_price,
-            fee.output_calculation.final_price,
+            fee.input_price,
+            fee.output_price,
             duration_ms,
             None,
         )
@@ -290,8 +317,8 @@ async fn handle_streaming_response(
             let _ = tx.send(Ok(event)).await;
         }
 
-        // 调用AI服务获取流式响应
-        let mut stream = match call_provider_stream(&state, &req, &user_id).await {
+        // 调用AI服务获取流式响应（支持降级）
+        let mut stream = match call_provider_stream_with_fallback(&state, &req, &user_id).await {
             Ok(stream) => stream,
             Err(e) => {
                 log::error!("[AI Hub] Provider call failed: {}", e);
@@ -302,9 +329,40 @@ async fn handle_streaming_response(
                         rollback_err
                     );
                 }
-                // 发送错误事件
-                let error_event = Event::default().data(format!("Error: {}", e));
-                let _ = tx.send(Ok(error_event)).await;
+                
+                // 发送一个符合OpenAI规范的错误完成块
+                let error_chunk = ChatCompletionChunk {
+                    id: request_id.clone(),
+                    object: Some("chat.completion.chunk".to_string()),
+                    created: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    model: req.model.clone(),
+                    choices: vec![ChatCompletionChunkChoice {
+                        index: 0,
+                        delta: Some(ChatCompletionChunkDelta {
+                            role: Some("assistant".to_string()),
+                            content: Some(format!("Error: {}", e)),
+                            reasoning_content: None,
+                            tool_calls: None,
+                            extra_fields: serde_json::Value::default(),
+                        }),
+                        finish_reason: Some("error".to_string()),
+                        logprobs: None,
+                        extra_fields: serde_json::Value::default(),
+                    }],
+                    system_fingerprint: None,
+                    extra_fields: serde_json::Value::default(),
+                };
+
+                if let Ok(event) = Event::default().json_data(&error_chunk) {
+                    let _ = tx.send(Ok(event)).await;
+                }
+                
+                // 发送终止事件
+                let done_event = Event::default().data("[DONE]");
+                let _ = tx.send(Ok(done_event)).await;
                 return;
             }
         };
@@ -312,6 +370,8 @@ async fn handle_streaming_response(
         // 累计输出内容
         let mut accumulated_content = String::new();
         let mut accumulated_reasoning_content = String::new();
+        let mut provider_usage: Option<serde_json::Value> = None;
+        let mut provider_sent_finish_reason = false;
 
         // 处理流式响应
         while let Some(chunk_result) = stream.next().await {
@@ -319,9 +379,22 @@ async fn handle_streaming_response(
                 Ok(mut chunk) => {
                     // 替换 model 字段为用户请求的原始模型标识符
                     chunk.model = req.model.clone();
+                    // 替换 ID 为请求 ID
+                    chunk.id = request_id.clone();
 
-                    // 累计输出内容和推理内容
+                    // 检查并保存供应商返回的 usage 信息
+                    if let Some(usage) = chunk.extra_fields.get("usage") {
+                        provider_usage = Some(usage.clone());
+                        log::info!("[AI Hub] Found provider usage: {:?}", usage);
+                    }
+
+                    // 检测供应商是否已经发送了 finish_reason
                     if let Some(choice) = chunk.choices.first() {
+                        if choice.finish_reason.is_some() {
+                            provider_sent_finish_reason = true;
+                            log::info!("[AI Hub] Provider sent finish_reason: {:?}", choice.finish_reason);
+                        }
+
                         if let Some(delta) = &choice.delta {
                             // 累积推理内容
                             if let Some(reasoning) = &delta.reasoning_content {
@@ -335,9 +408,19 @@ async fn handle_streaming_response(
                         }
                     }
 
-                    // 转换为SSE事件
-                    if let Ok(event) = Event::default().json_data(&chunk) {
-                        let _ = tx.send(Ok(event)).await;
+                    // 过滤掉空 choices 的 chunk（避免客户端显示"Empty assistant response"）
+                    // 只保留有内容、有 finish_reason 或有重要 extra_fields 的 chunk
+                    let should_forward = !chunk.choices.is_empty() 
+                        || chunk.choices.iter().any(|c| c.finish_reason.is_some())
+                        || !chunk.extra_fields.is_null() && !chunk.extra_fields.as_object().map_or(true, |obj| obj.is_empty());
+
+                    if should_forward {
+                        // 转换为SSE事件
+                        if let Ok(event) = Event::default().json_data(&chunk) {
+                            let _ = tx.send(Ok(event)).await;
+                        }
+                    } else {
+                        log::info!("[AI Hub] Skipping empty chunk: choices empty, no finish_reason, no extra_fields");
                     }
                 }
                 Err(e) => {
@@ -450,29 +533,39 @@ async fn handle_streaming_response(
             );
         }
 
-        // 发送结束块
-        let end_chunk = ChatCompletionChunk {
-            id: request_id.clone(),
-            object: Some("chat.completion.chunk".to_string()),
-            created: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            model: req.model.clone(),
-            choices: vec![ChatCompletionChunkChoice {
-                index: 0,
-                delta: None,
-                finish_reason: Some("stop".to_string()),
-                logprobs: None,
-                extra_fields: serde_json::Value::default(),
-            }],
-            system_fingerprint: None,
-            extra_fields: serde_json::Value::default(),
-        };
+        // 只有当供应商没有发送 finish_reason 时，才发送结束块
+        if !provider_sent_finish_reason {
+            log::info!("[AI Hub] Provider did not send finish_reason, creating end chunk");
 
-        if let Ok(event) = Event::default().json_data(&end_chunk) {
-            let _ = tx.send(Ok(event)).await;
+            let end_chunk = ChatCompletionChunk {
+                id: request_id.clone(),
+                object: Some("chat.completion.chunk".to_string()),
+                created: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                model: req.model.clone(),
+                choices: vec![ChatCompletionChunkChoice {
+                    index: 0,
+                    delta: None,
+                    finish_reason: Some("stop".to_string()),
+                    logprobs: None,
+                    extra_fields: serde_json::Value::default(),
+                }],
+                system_fingerprint: None,
+                extra_fields: provider_usage.as_ref().cloned().unwrap_or_else(|| serde_json::Value::default()),
+            };
+
+            if let Ok(event) = Event::default().json_data(&end_chunk) {
+                let _ = tx.send(Ok(event)).await;
+            }
+        } else {
+            log::info!("[AI Hub] Provider already sent finish_reason, skipping end chunk");
         }
+
+        // 发送 [DONE] 结束标记
+        let done_event = Event::default().data("[DONE]");
+        let _ = tx.send(Ok(done_event)).await;
 
         log::info!(
             "[AI Hub] Streaming response completed successfully (balance already pre-deducted, {} output tokens consumed)",
@@ -482,13 +575,39 @@ async fn handle_streaming_response(
         // 创建完整的用量记录并扣减输出费用
         let duration_ms = start_time.elapsed().as_millis() as i64;
 
+        // 克隆provider_usage以便后续使用
+        let provider_usage_clone = provider_usage.clone();
+
+        // 确定使用的 token 数量：优先使用供应商返回的，否则使用自己计算的
+        let (final_input_tokens, final_output_tokens) = if let Some(usage) = provider_usage_clone {
+            let prompt_tokens = usage.get("prompt_tokens")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(fee.input_tokens);
+            let completion_tokens = usage.get("completion_tokens")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(output_tokens);
+            log::info!(
+                "[AI Hub] Using provider token counts: prompt_tokens={}, completion_tokens={}",
+                prompt_tokens,
+                completion_tokens
+            );
+            (prompt_tokens, completion_tokens)
+        } else {
+            log::info!(
+                "[AI Hub] Using calculated token counts: input_tokens={}, output_tokens={}",
+                fee.input_tokens,
+                output_tokens
+            );
+            (fee.input_tokens, output_tokens)
+        };
+
         log::info!(
             "[AI Hub] Calling complete_usage_log (streaming): usage_log_id={}, user_id={}, model_id={}, input_tokens={}, output_tokens={}",
             usage_log_id,
             user_id,
             req.model,
-            fee.input_tokens,
-            output_tokens
+            final_input_tokens,
+            final_output_tokens
         );
 
         if let Err(e) = billing_service
@@ -497,12 +616,12 @@ async fn handle_streaming_response(
                 &user_id,
                 &req.model,
                 &api_key,
-                fee.input_tokens,
-                output_tokens,
-                fee.input_calculation.final_price,
-                fee.output_calculation.final_price,
+                final_input_tokens,
+                final_output_tokens,
+                fee.input_price,
+                fee.output_price,
                 duration_ms,
-                None,
+                provider_usage.clone(),
             )
             .await
         {
@@ -562,7 +681,41 @@ pub async fn chat_completions(
     };
     log::info!("[AI Hub] User authenticated: {}", user_id);
 
-    // 2. 输入验证
+    // 2. 路由模型以获取模型配置信息
+    let model_router = &state.model_router;
+    let (provider_config, model_info) = match model_router.route(&req.model, true).await {
+        Ok(result) => result,
+        Err(e) => {
+            let error_msg = format!("Failed to route model: {}", e);
+            log::warn!("[AI Hub] {}", error_msg);
+            if req.stream.unwrap_or(false) {
+                return create_sse_error_response(error_msg);
+            } else {
+                return Json(ApiResponse::<()>::error("500", &error_msg)).into_response();
+            }
+        }
+    };
+
+    log::info!(
+        "[AI Hub] Routed to provider: {}, model: {}",
+        provider_config.provider_code,
+        model_info.model_base.model_code
+    );
+
+    // 3. 计算动态内容长度限制
+    let max_text_length = if let Some(max_tokens) = model_info.model_base.max_tokens_per_request {
+        max_tokens as usize * 4
+    } else {
+        crate::domain::dto::validation::MAX_TEXT_LENGTH
+    };
+
+    log::info!(
+        "[AI Hub] Using max_text_length: {} (model max_tokens_per_request: {:?})",
+        max_text_length,
+        model_info.model_base.max_tokens_per_request
+    );
+
+    // 4. 输入验证（使用动态长度限制）
     let params = ChatCompletionRequestParams {
         model: &req.model,
         messages: &req.messages,
@@ -573,10 +726,11 @@ pub async fn chat_completions(
         presence_penalty: req.presence_penalty,
         n: req.n,
     };
+    
     match Validator::validate_chat_completion_request(&params) {
-        Ok(_) => log::info!("[AI Hub] Input validation passed"),
+        Ok(_) => log::info!("[AI Hub] Basic validation passed"),
         Err(e) => {
-            log::warn!("[AI Hub] Input validation failed: {}", e);
+            log::warn!("[AI Hub] Basic validation failed: {}", e);
             let error_msg = format!("输入验证失败: {}", e);
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(error_msg);
@@ -586,7 +740,20 @@ pub async fn chat_completions(
         }
     }
 
-    // 3. Token计算
+    match Validator::validate_messages_with_limit(&req.messages, max_text_length) {
+        Ok(_) => log::info!("[AI Hub] Message length validation passed"),
+        Err(e) => {
+            log::warn!("[AI Hub] Message length validation failed: {}", e);
+            let error_msg = format!("输入验证失败: {}", e);
+            if req.stream.unwrap_or(false) {
+                return create_sse_error_response(error_msg);
+            } else {
+                return Json(ApiResponse::<()>::error("400", &error_msg)).into_response();
+            }
+        }
+    }
+
+    // 5. Token计算
     let token_meta = match calculate_tokens(&req, &state.model_router).await {
         Ok(meta) => meta,
         Err(e) => {
@@ -603,7 +770,7 @@ pub async fn chat_completions(
         req.model
     );
 
-    // 3.5. 检查速率限制（使用实际的token数量）
+    // 5.5. 检查速率限制（使用实际的token数量）
     let input_tokens_i32 = token_meta.input_tokens as i32;
     let rate_limit_result = state
         .rate_limit_service
@@ -659,19 +826,17 @@ pub async fn chat_completions(
 
     // 4. 获取动态定价并预消费和配额检查
     let billing_service = &state.billing_service;
-    let price_rule_service = &state.price_rule_service;
 
     // 预估输出token（基于max_tokens或默认值）
     let estimated_output_tokens = req.max_tokens.unwrap_or(500) as i64;
 
-    // 使用PriceRuleService获取动态定价
+    // 获取动态定价
     let fee = match get_dynamic_pricing(
         &user_id,
         &req.model,
         token_meta.input_tokens,
         estimated_output_tokens,
         billing_service,
-        price_rule_service,
         &state.model_router,
         &api_key,
     )
@@ -873,7 +1038,6 @@ async fn get_dynamic_pricing(
     input_tokens: i64,
     output_tokens: i64,
     billing_service: &BillingService,
-    _price_rule_service: &PriceRuleService,
     model_router: &crate::routers::model_router::ModelRouter,
     api_key: &str,
 ) -> std::result::Result<CalculatedFee, String> {
@@ -936,15 +1100,34 @@ async fn get_dynamic_pricing(
         fee.input_cost,
         fee.output_cost,
         fee.total_cost,
-        fee.input_calculation.final_price,
-        fee.output_calculation.final_price
+        fee.input_price,
+        fee.output_price
     );
 
     Ok(fee)
 }
 
-/// 调用AI Provider获取真实流式响应
-async fn call_provider_stream(
+/// 检测错误是否为429 Too Many Requests
+fn is_rate_limit_error(error: &str) -> bool {
+    error.contains("429") || 
+    error.contains("Too Many Requests") ||
+    error.contains("1302") ||
+    error.contains("并发数过高")
+}
+
+/// 获取模型的所有可用映射（按priority降序）
+async fn get_all_mappings(
+    model_id: &str,
+    provider_id: &str,
+) -> std::result::Result<Vec<ModelProviderMapping>, String> {
+    let rb = crate::pool!();
+    ModelProviderMapping::select_by_model_and_provider_all(rb, model_id, provider_id)
+        .await
+        .map_err(|e| format!("Failed to query mappings: {}", e))
+}
+
+/// 调用AI Provider获取真实流式响应（支持降级）
+async fn call_provider_stream_with_fallback(
     state: &Arc<ServiceContext>,
     req: &ChatCompletionRequest,
     _user_id: &str,
@@ -955,86 +1138,207 @@ async fn call_provider_stream(
     >,
     String,
 > {
-    // 1. 使用ModelRouter解析模型标识符并路由到对应的provider和model
     let model_router = &state.model_router;
 
-    // 解析模型标识符格式: "provider_code/model_code"
     let (provider_config, model_info) = model_router
         .route(&req.model, true)
         .await
         .map_err(|e| format!("Failed to route model: {}", e))?;
 
-    log::info!(
-        "[AI Hub] Routed to provider: {}, model: {}",
-        provider_config.provider_code,
-        model_info.model_base.model_code
-    );
+    let rb = crate::pool!();
 
-    // 2. 查询供应商模型名称
-    let provider_model_name = {
-        let rb = crate::pool!();
-
-        // 通过 model_code 查询 model_base 获取 model_id
-        let model_base = ModelBase::select_by_model_code(rb, &model_info.model_base.model_code)
-            .await
-            .map_err(|e| format!("Failed to query model_base: {}", e))?
-            .ok_or_else(|| {
-                format!(
-                    "Model '{}' not found in model_base",
-                    model_info.model_base.model_code
-                )
-            })?;
-
-        let model_id = model_base
-            .id
-            .ok_or_else(|| "Model ID not found".to_string())?;
-        let provider_id = provider_config.id.as_str();
-
-        // 通过 model_id 和 provider_id 查询 model_provider_mapping 获取 provider_model_name
-        let mapping =
-            ModelProviderMapping::select_by_model_and_provider(rb, &model_id, provider_id)
-                .await
-                .map_err(|e| format!("Failed to query model_provider_mapping: {}", e))?
-                .ok_or_else(|| {
-                    format!(
-                        "Model provider mapping not found for model_id: {}, provider_id: {}",
-                        model_id, provider_id
-                    )
-                })?;
-
-        mapping.provider_model_name
-    };
-
-    log::info!("[AI Hub] Provider model name: {}", provider_model_name);
-
-    // 3. 从ProviderRegistry获取Provider实例
-    let provider_registry = state.provider_registry.read().await;
-
-    let provider = provider_registry
-        .get_provider(&provider_config.provider_code)
+    let model_base = ModelBase::select_by_model_code(rb, &model_info.model_base.model_code)
+        .await
+        .map_err(|e| format!("Failed to query model_base: {}", e))?
         .ok_or_else(|| {
             format!(
-                "Provider not found for provider_code: {}",
-                provider_config.provider_code
+                "Model '{}' not found in model_base",
+                model_info.model_base.model_code
             )
         })?;
 
-    // 4. 转换请求类型，使用供应商模型名称
-    let provider_req = convert_to_provider_request(req, &provider_model_name);
+    let model_id = model_base.id.ok_or_else(|| "Model ID not found".to_string())?;
+    let provider_id = provider_config.id.as_str();
 
-    // 5. 调用Provider的chat_completions方法
-    let response = provider
-        .chat_completions(provider_req, &serde_json::json!({}))
-        .await
-        .map_err(|e| format!("Provider error: {}", e))?;
+    let mappings = get_all_mappings(&model_id, provider_id).await?;
 
-    // 6. 返回流式响应
-    match response {
-        crate::domain::dto::chat::ChatCompletionResponse::Stream(stream) => Ok(stream),
-        crate::domain::dto::chat::ChatCompletionResponse::NonStream(_) => {
-            Err("Expected stream response but got non-stream response".to_string())
+    if mappings.is_empty() {
+        return Err("No mappings found for this model".to_string());
+    }
+
+    let mut last_error = String::new();
+
+    for (index, mapping) in mappings.iter().enumerate() {
+        log::info!(
+            "[AI Hub] Trying mapping {}/{}: provider_model_name={}, priority={:?}",
+            index + 1,
+            mappings.len(),
+            mapping.provider_model_name,
+            mapping.priority
+        );
+
+        let provider_registry = state.provider_registry.read().await;
+
+        let provider = match provider_registry.get_provider(&provider_config.provider_code) {
+            Some(p) => p,
+            None => {
+                last_error = format!(
+                    "Provider not found for provider_code: {}",
+                    provider_config.provider_code
+                );
+                log::warn!("[AI Hub] {}", last_error);
+                continue;
+            }
+        };
+
+        let provider_req = convert_to_provider_request(req, &mapping.provider_model_name);
+
+        match provider
+            .chat_completions(provider_req, &serde_json::json!({}))
+            .await
+        {
+            Ok(response) => {
+                log::info!(
+                    "[AI Hub] Successfully called provider with mapping {}/{}",
+                    index + 1,
+                    mappings.len()
+                );
+                match response {
+                    crate::domain::dto::chat::ChatCompletionResponse::Stream(stream) => {
+                        return Ok(stream);
+                    }
+                    crate::domain::dto::chat::ChatCompletionResponse::NonStream(_) => {
+                        last_error = "Expected stream response but got non-stream response".to_string();
+                        log::warn!("[AI Hub] {}", last_error);
+                        continue;
+                    }
+                }
+            }
+            Err(e) => {
+                last_error = format!("Provider error: {}", e);
+                log::error!("[AI Hub] Mapping {}/{} failed: {}", index + 1, mappings.len(), last_error);
+
+                if is_rate_limit_error(&last_error) {
+                    log::info!("[AI Hub] Rate limit error detected, trying next mapping...");
+                    continue;
+                } else {
+                    return Err(last_error);
+                }
+            }
         }
     }
+
+    Err(format!(
+        "All {} mappings failed. Last error: {}",
+        mappings.len(),
+        last_error
+    ))
+}
+
+/// 调用AI Provider获取真实响应（支持降级）
+async fn call_provider_with_fallback(
+    state: &Arc<ServiceContext>,
+    req: &ChatCompletionRequest,
+    _user_id: &str,
+) -> std::result::Result<ChatCompletion, String> {
+    let model_router = &state.model_router;
+
+    let (provider_config, model_info) = model_router
+        .route(&req.model, true)
+        .await
+        .map_err(|e| format!("Failed to route model: {}", e))?;
+
+    let rb = crate::pool!();
+
+    let model_base = ModelBase::select_by_model_code(rb, &model_info.model_base.model_code)
+        .await
+        .map_err(|e| format!("Failed to query model_base: {}", e))?
+        .ok_or_else(|| {
+            format!(
+                "Model '{}' not found in model_base",
+                model_info.model_base.model_code
+            )
+        })?;
+
+    let model_id = model_base.id.ok_or_else(|| "Model ID not found".to_string())?;
+    let provider_id = provider_config.id.as_str();
+
+    let mappings = get_all_mappings(&model_id, provider_id).await?;
+
+    if mappings.is_empty() {
+        return Err("No mappings found for this model".to_string());
+    }
+
+    let mut last_error = String::new();
+
+    for (index, mapping) in mappings.iter().enumerate() {
+        log::info!(
+            "[AI Hub] Trying mapping {}/{}: provider_model_name={}, priority={:?}",
+            index + 1,
+            mappings.len(),
+            mapping.provider_model_name,
+            mapping.priority
+        );
+
+        let provider_registry = state.provider_registry.read().await;
+
+        let provider = match provider_registry.get_provider(&provider_config.provider_code) {
+            Some(p) => p,
+            None => {
+                last_error = format!(
+                    "Provider not found for provider_code: {}",
+                    provider_config.provider_code
+                );
+                log::warn!("[AI Hub] {}", last_error);
+                continue;
+            }
+        };
+
+        let provider_req = convert_to_provider_request(req, &mapping.provider_model_name);
+
+        match provider
+            .chat_completions(provider_req, &serde_json::json!({}))
+            .await
+        {
+            Ok(response) => {
+                log::info!(
+                    "[AI Hub] Successfully called provider with mapping {}/{}",
+                    index + 1,
+                    mappings.len()
+                );
+                match response {
+                    crate::domain::dto::chat::ChatCompletionResponse::NonStream(completion) => {
+                        return convert_from_provider_response(
+                            crate::domain::dto::chat::ChatCompletionResponse::NonStream(completion),
+                            &req.model,
+                        );
+                    }
+                    crate::domain::dto::chat::ChatCompletionResponse::Stream(_) => {
+                        last_error = "Expected non-stream response but got stream response".to_string();
+                        log::warn!("[AI Hub] {}", last_error);
+                        continue;
+                    }
+                }
+            }
+            Err(e) => {
+                last_error = format!("Provider error: {}", e);
+                log::error!("[AI Hub] Mapping {}/{} failed: {}", index + 1, mappings.len(), last_error);
+
+                if is_rate_limit_error(&last_error) {
+                    log::info!("[AI Hub] Rate limit error detected, trying next mapping...");
+                    continue;
+                } else {
+                    return Err(last_error);
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "All {} mappings failed. Last error: {}",
+        mappings.len(),
+        last_error
+    ))
 }
 
 /// 调用AI Provider获取真实响应
@@ -1043,81 +1347,7 @@ async fn call_provider(
     req: &ChatCompletionRequest,
     _user_id: &str,
 ) -> std::result::Result<ChatCompletion, String> {
-    // 1. 使用ModelRouter解析模型标识符并路由到对应的provider和model
-    let model_router = &state.model_router;
-
-    // 解析模型标识符格式: "provider_code/model_code"
-    let (provider_config, model_info) = model_router
-        .route(&req.model, true)
-        .await
-        .map_err(|e| format!("Failed to route model: {}", e))?;
-
-    log::info!(
-        "[AI Hub] Routed to provider: {}, model: {}",
-        provider_config.provider_code,
-        model_info.model_base.model_code
-    );
-
-    // 2. 查询供应商模型名称
-    let provider_model_name = {
-        let rb = crate::pool!();
-
-        // 通过 model_code 查询 model_base 获取 model_id
-        let model_base = ModelBase::select_by_model_code(rb, &model_info.model_base.model_code)
-            .await
-            .map_err(|e| format!("Failed to query model_base: {}", e))?
-            .ok_or_else(|| {
-                format!(
-                    "Model '{}' not found in model_base",
-                    model_info.model_base.model_code
-                )
-            })?;
-
-        let model_id = model_base
-            .id
-            .ok_or_else(|| "Model ID not found".to_string())?;
-        let provider_id = provider_config.id.as_str();
-
-        // 通过 model_id 和 provider_id 查询 model_provider_mapping 获取 provider_model_name
-        let mapping =
-            ModelProviderMapping::select_by_model_and_provider(rb, &model_id, provider_id)
-                .await
-                .map_err(|e| format!("Failed to query model_provider_mapping: {}", e))?
-                .ok_or_else(|| {
-                    format!(
-                        "Model provider mapping not found for model_id: {}, provider_id: {}",
-                        model_id, provider_id
-                    )
-                })?;
-
-        mapping.provider_model_name
-    };
-
-    log::info!("[AI Hub] Provider model name: {}", provider_model_name);
-
-    // 3. 从ProviderRegistry获取Provider实例
-    let provider_registry = state.provider_registry.read().await;
-
-    let provider = provider_registry
-        .get_provider(&provider_config.provider_code)
-        .ok_or_else(|| {
-            format!(
-                "Provider not found for provider_code: {}",
-                provider_config.provider_code
-            )
-        })?;
-
-    // 4. 转换请求类型，使用供应商模型名称
-    let provider_req = convert_to_provider_request(req, &provider_model_name);
-
-    // 5. 调用Provider的chat_completions方法
-    let response = provider
-        .chat_completions(provider_req, &serde_json::json!({}))
-        .await
-        .map_err(|e| format!("Provider error: {}", e))?;
-
-    // 6. 转换响应类型，使用原始 model 标识符替换供应商返回的 model 字段
-    convert_from_provider_response(response, &req.model)
+    call_provider_with_fallback(state, req, _user_id).await
 }
 
 /// 转换为Provider请求类型

@@ -1,7 +1,27 @@
 //! Token计数服务模块
 //!
 //! 提供多模态内容（文本、图像、音频）的token计数功能
-//! 支持OpenAI模型的精确计算和非OpenAI模型的智能估算
+//! 
+//! ## 混合Tokenizer架构
+//!
+//! 本模块采用混合tokenizer架构，支持多种tokenizer类型：
+//!
+//! - **OpenAI模型**：使用tiktoken-rs库进行精确token计算
+//! - **DeepSeek等非OpenAI模型**：使用Hugging Face tokenizers库（需要启用hf_tokenizers feature）
+//! - **未知模型**：使用近似估算算法作为fallback
+//!
+//! ## 特性配置
+//!
+//! 启用Hugging Face tokenizer支持：
+//! ```toml
+//! [features]
+//! hf_tokenizers = ["tokenizers"]
+//! ```
+//!
+//! 编译时启用：
+//! ```bash
+//! cargo build --features hf_tokenizers
+//! ```
 
 use crate::routers::model_router::ModelRoutingInfo;
 use base64::{Engine, engine::general_purpose};
@@ -10,6 +30,24 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex, OnceLock};
 use tiktoken_rs::CoreBPE;
+
+#[cfg(feature = "hf_tokenizers")]
+use tokenizers::Tokenizer;
+
+/// Tokenizer类型枚举
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TokenizerType {
+    OpenAI,      // 使用tiktoken-rs
+    HuggingFace, // 使用Hugging Face tokenizers
+}
+
+/// Tokenizer包装器，支持多种tokenizer类型
+struct TokenizerWrapper {
+    tokenizer_type: TokenizerType,
+    openai_bpe: Option<Arc<CoreBPE>>,
+    #[cfg(feature = "hf_tokenizers")]
+    hf_tokenizer: Option<Tokenizer>,
+}
 
 /// Token计数元数据结构
 #[derive(Debug, Clone, Default)]
@@ -88,6 +126,10 @@ pub struct ChatMessage {
 /// Tokenizer缓存（单例模式）
 static ENCODING_CACHE: OnceLock<Mutex<HashMap<String, Arc<CoreBPE>>>> = OnceLock::new();
 
+/// Hugging Face tokenizer缓存（单例模式）
+#[cfg(feature = "hf_tokenizers")]
+static HF_TOKENIZER_CACHE: OnceLock<Mutex<HashMap<String, Tokenizer>>> = OnceLock::new();
+
 /// Token计数服务结构体
 pub struct TokenCounter;
 
@@ -127,8 +169,8 @@ impl TokenCounter {
             return Ok(TokenCountMeta::default());
         }
 
-        log::info!("[TokenCounter] Using o200k_base token counting for all models");
-        let token_count = Self::count_text_token_openai(text, model)?;
+        log::info!("[TokenCounter] Using hybrid tokenizer architecture for all models");
+        let token_count = Self::count_text_token_with_tokenizer(text, model)?;
 
         log::info!(
             "[TokenCounter] Token count result: token_count={}, is_output={}",
@@ -340,7 +382,49 @@ impl TokenCounter {
 
     // === 私有辅助方法 ===
 
-    /// 获取模型对应的encoding名称
+    /// 获取模型对应的tokenizer类型
+    ///
+    /// # 参数
+    /// * `model` - 模型名称（格式："provider_code/model_code" 或 "model_code"）
+    ///
+    /// # 返回
+    /// * `TokenizerType` - tokenizer类型
+    ///
+    /// # 实现说明
+    /// - **OpenAI模型**：返回TokenizerType::OpenAI，使用tiktoken-rs进行精确token计算
+    /// - **DeepSeek等非OpenAI模型**：返回TokenizerType::HuggingFace，使用Hugging Face tokenizers
+    /// - **其他模型**：默认使用OpenAI tokenizer作为fallback
+    fn get_tokenizer_type(model: &str) -> TokenizerType {
+        log::info!("[TokenCounter] Getting tokenizer type for model: {}", model);
+
+        let model_code = if model.contains('/') {
+            model.split('/').next_back().unwrap_or(model)
+        } else {
+            model
+        };
+
+        let lower = model_code.to_lowercase();
+
+        log::info!("[TokenCounter] Extracted model code: {}", model_code);
+
+        // DeepSeek等非OpenAI模型使用Hugging Face tokenizer
+        if lower.starts_with("deepseek") {
+            log::info!(
+                "[TokenCounter] Using Hugging Face tokenizer for model: {}",
+                model_code
+            );
+            TokenizerType::HuggingFace
+        } else {
+            // OpenAI模型使用tiktoken-rs
+            log::info!(
+                "[TokenCounter] Using OpenAI tokenizer for model: {}",
+                model_code
+            );
+            TokenizerType::OpenAI
+        }
+    }
+
+    /// 获取模型对应的encoding名称（仅用于OpenAI模型）
     ///
     /// # 参数
     /// * `model` - 模型名称（格式："provider_code/model_code" 或 "model_code"）
@@ -350,7 +434,6 @@ impl TokenCounter {
     fn get_encoding_for_model(model: &str) -> &'static str {
         log::info!("[TokenCounter] Getting encoding for model: {}", model);
 
-        // 提取模型代号（去掉供应商代号部分）
         let model_code = if model.contains('/') {
             model.split('/').last().unwrap_or(model)
         } else {
@@ -373,12 +456,6 @@ impl TokenCounter {
             || lower.starts_with("gpt-4.1-nano")
             || lower.starts_with("gpt-5-mini")
             || lower.starts_with("gpt-5-nano")
-            || lower.starts_with("v3")
-            || lower.starts_with("k")
-            || lower.starts_with("1")
-            || lower.starts_with("glm")
-            || lower.starts_with("kimi")
-            || lower.starts_with("deepseek")
         {
             log::info!(
                 "[TokenCounter] Using o200k_base encoding (via gpt-4o) for model: {}",
@@ -427,7 +504,124 @@ impl TokenCounter {
             .ok_or_else(|| format!("Encoding '{}' not found in cache", encoding_name))
     }
 
-    /// OpenAI模型的文本token计算（精确）
+    /// 获取Hugging Face tokenizer实例（如果feature启用）
+    ///
+    /// # 参数
+    /// * `model` - 模型名称
+    ///
+    /// # 返回
+    /// * `Ok(Tokenizer)` - 成功获取tokenizer实例
+    /// * `Err(String)` - 加载失败时的错误信息
+    #[cfg(feature = "hf_tokenizers")]
+    fn get_hf_tokenizer(model: &str) -> Result<Tokenizer, String> {
+        let cache = HF_TOKENIZER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+        {
+            let mut cache_guard = cache.lock().expect("Failed to acquire HF tokenizer cache lock");
+            if !cache_guard.contains_key(model) {
+                log::info!("[TokenCounter] Loading Hugging Face tokenizer for model: {}", model);
+
+                // 尝试从Hugging Face Hub加载tokenizer
+                let tokenizer = Tokenizer::from_pretrained(model, None)
+                    .map_err(|e| format!("Failed to load HF tokenizer for '{}': {}", model, e))?;
+
+                cache_guard.insert(model.to_string(), tokenizer);
+            }
+        }
+
+        let cache_guard = cache.lock().expect("Failed to acquire HF tokenizer cache lock");
+        cache_guard
+            .get(model)
+            .cloned()
+            .ok_or_else(|| format!("HF tokenizer for '{}' not found in cache", model))
+    }
+
+    /// 获取tokenizer包装器（支持多种tokenizer类型）
+    ///
+    /// # 参数
+    /// * `model` - 模型名称
+    ///
+    /// # 返回
+    /// * `Ok(TokenizerWrapper)` - 成功获取tokenizer包装器
+    /// * `Err(String)` - 加载失败时的错误信息
+    ///
+    /// # 实现说明
+    /// 根据模型类型返回相应的tokenizer：
+    /// - **OpenAI模型**：使用tiktoken-rs的CoreBPE进行精确token计算
+    /// - **DeepSeek等非OpenAI模型**：使用Hugging Face tokenizers（如果hf_tokenizers feature启用）
+    /// - **Fallback**：如果Hugging Face tokenizer不可用，回退到OpenAI tokenizer
+    fn get_tokenizer(model: &str) -> Result<TokenizerWrapper, String> {
+        let tokenizer_type = Self::get_tokenizer_type(model);
+
+        match tokenizer_type {
+            TokenizerType::OpenAI => {
+                let encoding_name = Self::get_encoding_for_model(model);
+                let openai_bpe = Self::get_cached_encoding(encoding_name)?;
+                Ok(TokenizerWrapper {
+                    tokenizer_type,
+                    openai_bpe: Some(openai_bpe),
+                    #[cfg(feature = "hf_tokenizers")]
+                    hf_tokenizer: None,
+                })
+            }
+            TokenizerType::HuggingFace => {
+                #[cfg(feature = "hf_tokenizers")]
+                {
+                    let hf_tokenizer = Self::get_hf_tokenizer(model)?;
+                    Ok(TokenizerWrapper {
+                        tokenizer_type,
+                        openai_bpe: None,
+                        hf_tokenizer: Some(hf_tokenizer),
+                    })
+                }
+                #[cfg(not(feature = "hf_tokenizers"))]
+                {
+                    log::warn!(
+                        "[TokenCounter] Hugging Face tokenizer feature not enabled, falling back to OpenAI tokenizer for model: {}",
+                        model
+                    );
+                    let encoding_name = Self::get_encoding_for_model(model);
+                    let openai_bpe = Self::get_cached_encoding(encoding_name)?;
+                    Ok(TokenizerWrapper {
+                        tokenizer_type: TokenizerType::OpenAI,
+                        openai_bpe: Some(openai_bpe),
+                        #[cfg(feature = "hf_tokenizers")]
+                        hf_tokenizer: None,
+                    })
+                }
+            }
+        }
+    }
+
+    /// 近似估算token数量（当精确tokenizer不可用时使用）
+    ///
+    /// # 参数
+    /// * `text` - 文本内容
+    ///
+    /// # 返回
+    /// * `i64` - 估算的token数量
+    ///
+    /// # 实现说明
+    /// 使用简单的近似算法：字符数 * 0.6（适用于中英文混合文本）
+    /// 当Hugging Face tokenizer加载失败或不可用时，作为fallback机制使用
+    fn estimate_tokens(text: &str) -> i64 {
+        let char_count = text.chars().count() as i64;
+        let word_count = text.split_whitespace().count() as i64;
+
+        // 简单的近似算法：字符数 * 0.6（适用于中英文混合文本）
+        let estimated = (char_count as f64 * 0.6).ceil() as i64;
+
+        log::info!(
+            "[TokenCounter] Estimated tokens: {} (chars: {}, words: {})",
+            estimated,
+            char_count,
+            word_count
+        );
+
+        estimated
+    }
+
+    /// 文本token计算（混合架构：支持多种tokenizer类型）
     ///
     /// # 参数
     /// * `text` - 文本内容
@@ -436,17 +630,76 @@ impl TokenCounter {
     /// # 返回
     /// * `Ok(i64)` - token数量
     /// * `Err(String)` - 错误信息
-    fn count_text_token_openai(text: &str, model: &str) -> Result<i64, String> {
+    ///
+    /// # 实现说明
+    /// - OpenAI模型：使用tiktoken-rs（精确）
+    /// - DeepSeek等非OpenAI模型：使用Hugging Face tokenizers（如果feature启用）
+    /// - 回退机制：如果Hugging Face tokenizer加载失败，使用近似估算
+    fn count_text_token_with_tokenizer(text: &str, model: &str) -> Result<i64, String> {
         if text.is_empty() {
             return Ok(0);
         }
 
-        let encoding_name = Self::get_encoding_for_model(model);
-        let tokenizer = Self::get_cached_encoding(encoding_name)?;
+        log::info!("[TokenCounter] Using hybrid tokenizer architecture for model: {}", model);
 
-        let tokens = tokenizer.encode_with_special_tokens(text);
-
-        Ok(tokens.len() as i64)
+        match Self::get_tokenizer(model) {
+            Ok(tokenizer_wrapper) => {
+                match tokenizer_wrapper.tokenizer_type {
+                    TokenizerType::OpenAI => {
+                        if let Some(openai_bpe) = tokenizer_wrapper.openai_bpe {
+                            let tokens = openai_bpe.encode_with_special_tokens(text);
+                            log::info!(
+                                "[TokenCounter] OpenAI tokenizer result: {} tokens",
+                                tokens.len()
+                            );
+                            Ok(tokens.len() as i64)
+                        } else {
+                            Err("OpenAI tokenizer not available".to_string())
+                        }
+                    }
+                    TokenizerType::HuggingFace => {
+                        #[cfg(feature = "hf_tokenizers")]
+                        {
+                            if let Some(hf_tokenizer) = tokenizer_wrapper.hf_tokenizer {
+                                match hf_tokenizer.encode(text, false) {
+                                    Ok(encoding) => {
+                                        let token_count = encoding.get_ids().len() as i64;
+                                        log::info!(
+                                            "[TokenCounter] Hugging Face tokenizer result: {} tokens",
+                                            token_count
+                                        );
+                                        Ok(token_count)
+                                    }
+                                    Err(e) => {
+                                        log::warn!(
+                                            "[TokenCounter] Hugging Face tokenizer encoding failed: {}, falling back to estimation",
+                                            e
+                                        );
+                                        Ok(Self::estimate_tokens(text))
+                                    }
+                                }
+                            } else {
+                                log::warn!("[TokenCounter] Hugging Face tokenizer not available, falling back to estimation");
+                                Ok(Self::estimate_tokens(text))
+                            }
+                        }
+                        #[cfg(not(feature = "hf_tokenizers"))]
+                        {
+                            log::warn!("[TokenCounter] Hugging Face tokenizer feature not enabled, falling back to estimation");
+                            Ok(Self::estimate_tokens(text))
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!(
+                    "[TokenCounter] Failed to get tokenizer for model '{}': {}, falling back to estimation",
+                    model,
+                    e
+                );
+                Ok(Self::estimate_tokens(text))
+            }
+        }
     }
 
     /// OpenAI图像token计算
@@ -807,5 +1060,54 @@ mod tests {
         let meta = TokenCounter::count_audio_token(&audio_base64, "gpt-4", false, None)
             .expect("Failed to count audio tokens");
         assert!(meta.input_tokens > 0);
+    }
+
+    #[test]
+    fn test_openai_tokenizer_type() {
+        let openai_models = vec![
+            "gpt-4", "gpt-4-turbo", "gpt-4o", "gpt-3.5-turbo",
+            "o1-preview", "o1-mini", "text-embedding-3-small"
+        ];
+        for model in openai_models {
+            let meta = TokenCounter::count_text_token("Hello, world!", model, false)
+                .expect(&format!("Failed to count tokens for OpenAI model: {}", model));
+            assert!(meta.input_tokens > 0, "OpenAI model {} should count tokens", model);
+        }
+    }
+
+    #[test]
+    fn test_deepseek_tokenizer_type() {
+        let deepseek_models = vec![
+            "deepseek-chat", "deepseek-coder", "deepseek-v3"
+        ];
+        for model in deepseek_models {
+            let meta = TokenCounter::count_text_token("Hello, world!", model, false)
+                .expect(&format!("Failed to count tokens for DeepSeek model: {}", model));
+            assert!(meta.input_tokens > 0, "DeepSeek model {} should count tokens", model);
+        }
+    }
+
+    #[test]
+    fn test_hybrid_tokenizer_fallback() {
+        let unknown_model = "unknown-model-v1";
+        let meta = TokenCounter::count_text_token("Hello, world!", unknown_model, false)
+            .expect("Failed to count tokens for unknown model (should fallback)");
+        assert!(meta.input_tokens > 0, "Fallback should estimate tokens for unknown model");
+    }
+
+    #[test]
+    fn test_multilingual_token_counting() {
+        let texts = vec![
+            ("Hello, world!", "gpt-4"),
+            ("你好，世界！", "gpt-4"),
+            ("こんにちは世界", "gpt-4"),
+            ("Hello, world!", "deepseek-chat"),
+            ("你好，世界！", "deepseek-chat"),
+        ];
+        for (text, model) in texts {
+            let meta = TokenCounter::count_text_token(text, model, false)
+                .expect(&format!("Failed to count tokens for {} with model {}", text, model));
+            assert!(meta.input_tokens > 0, "Should count tokens for multilingual text");
+        }
     }
 }

@@ -1138,7 +1138,8 @@ pub async fn save_init_config(
 
     info!("[INIT] 开始初始化事务: {}", transaction_id);
 
-    let config_backup = match std::fs::read_to_string("application.json5") {
+    let config_path = "config/application.json5";
+    let config_backup = match std::fs::read_to_string(config_path) {
         Ok(content) => content,
         Err(e) => {
             error!("[INIT] 读取配置文件失败: {}", e);
@@ -1157,7 +1158,7 @@ pub async fn save_init_config(
     if let Err(e) = transaction_manager
         .execute_step("save_config", || async {
             let mut config_file =
-                File::open("application.json5").map_err(|e| format!("打开配置文件失败: {}", e))?;
+                File::open(config_path).map_err(|e| format!("打开配置文件失败: {}", e))?;
             let mut config_content = String::new();
             config_file
                 .read_to_string(&mut config_content)
@@ -1197,7 +1198,7 @@ pub async fn save_init_config(
 
             let updated_config =
                 json5::to_string(&config).map_err(|e| format!("序列化配置文件失败: {}", e))?;
-            std::fs::write("application.json5", updated_config)
+            std::fs::write(config_path, updated_config)
                 .map_err(|e| format!("写入配置文件失败: {}", e))?;
 
             Ok::<(), String>(())

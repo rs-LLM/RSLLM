@@ -1,6 +1,3 @@
-// 用途：导入AI处理管道相关结构体
-// 说明：用于初始化管道配置表结构
-use crate::domain::table::provider::{Pipeline, PipelinePluginConfig};
 // 用途：导入AI模型基础信息相关结构体
 // 说明：用于初始化模型基础信息表结构
 use crate::domain::table::ai_hub::model_base::ModelBase;
@@ -11,18 +8,13 @@ use crate::domain::table::ai_hub::model_provider_mapping::ModelProviderMapping;
 // 说明：用于初始化提供商配置表结构
 use crate::domain::table::ai_hub::provider_config::ProviderConfig;
 // 用途：导入用量计费相关结构体
-// 说明：用于初始化用量记录、配额、价格规则表结构
-use crate::domain::table::ai_hub::price_rule::AiHubPriceRule;
+// 说明：用于初始化用量记录表结构
 use crate::domain::table::ai_hub::usage_log::AiHubUsageLog;
-use crate::domain::table::ai_hub::user_quota::AiHubUserQuota;
 // 用途：导入API密钥相关结构体
 // 说明：用于初始化API密钥表结构
 use crate::domain::table::ai_hub::api_key::ApiKey;
 use crate::domain::table::ai_hub::user_level_config::UserLevelConfig;
 use crate::domain::table::ai_hub::user_level_model_rate_limit::UserLevelModelRateLimit;
-// 用途：导入计费标准相关结构体
-// 说明：用于初始化计费标准表结构
-use crate::domain::table::ai_hub::pricing::Pricing;
 // 用途：导入交易相关结构体
 // 说明：用于初始化交易表结构
 use crate::domain::table::ai_hub::transaction::Transaction;
@@ -81,23 +73,6 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
     // 用途：获取数据库连接
     // 说明：用于执行表同步操作
     let conn = rb.acquire().await.expect("connection database fail");
-
-    // 用途：同步供应商表结构
-    // 说明：存储各种AI服务供应商的基础配置信息
-    use crate::domain::table::provider::Provider;
-    let table = Provider {
-        id: Some(Default::default()),
-        name: Default::default(),
-        provider_type: Default::default(),
-        config_details: Default::default(),
-        enabled: Some(Default::default()),
-        base_price: Some(Default::default()),
-        context_price: Some(Default::default()),
-        output_price: Some(Default::default()),
-        created_at: Some(Default::default()),
-        updated_at: Some(Default::default()),
-    };
-    let _ = RBatis::sync(&conn, mapper, &table, "provider").await;
 
     // 用途：同步供应商配置表结构
     // 说明：存储各种AI服务供应商的基础配置信息
@@ -160,33 +135,6 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
     };
     let _ = RBatis::sync(&conn, mapper, &table, "model_provider_mapping").await;
 
-    // 用途：同步AI处理管道表结构
-    // 说明：存储AI处理流程的配置信息，支持多步骤处理
-    let table = Pipeline {
-        id: Some(Default::default()),
-        name: Default::default(),
-        pipeline_type: Default::default(),
-        description: Some(Default::default()),
-        enabled: Some(Default::default()),
-        created_at: Some(Default::default()),
-        updated_at: Some(Default::default()),
-    };
-    let _ = RBatis::sync(&conn, mapper, &table, "pipeline").await;
-
-    // 用途：同步管道插件配置表结构
-    // 说明：存储管道中各个插件的具体配置信息
-    let table = PipelinePluginConfig {
-        id: Some(Default::default()),
-        pipeline_id: Some(Default::default()),
-        plugin_type: Default::default(),
-        config_data: Default::default(),
-        enabled: Some(Default::default()),
-        order_in_pipeline: Some(Default::default()),
-        created_at: Some(Default::default()),
-        updated_at: Some(Default::default()),
-    };
-    let _ = RBatis::sync(&conn, mapper, &table, "pipeline_plugin_config").await;
-
     // 用途：同步用量记录表结构
     // 说明：记录每次AI请求的详细用量信息
     let table = AiHubUsageLog {
@@ -223,47 +171,6 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
     };
     let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_usage_log").await;
 
-    // 用途：同步用户配额表结构
-    // 说明：管理用户的配额和余额
-    let table = AiHubUserQuota {
-        id: Some(Default::default()),
-        user_id: Default::default(),
-        quota_period: Some(Default::default()),
-        period_start: Some(Default::default()),
-        period_end: Some(Default::default()),
-        status: Some(Default::default()),
-        warning_threshold: Some(Default::default()),
-        critical_threshold: Some(Default::default()),
-        created_at: Some(Default::default()),
-        updated_at: Some(Default::default()),
-        last_used_at: Some(Default::default()),
-        rpm_limit: Some(Default::default()),
-        rpm_used: Some(Default::default()),
-        rpm_reset_time: Some(Default::default()),
-        tpm_limit: Some(Default::default()),
-        tpm_used: Some(Default::default()),
-        tpm_reset_time: Some(Default::default()),
-    };
-    let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_user_quota").await;
-
-    // 用途：同步价格规则表结构
-    // 说明：管理动态价格规则
-    let table = AiHubPriceRule {
-        id: Some(Default::default()),
-        rule_name: Default::default(),
-        conditions: Some(Default::default()),
-        discount_rate: Some(Default::default()),
-        additional_rate: Some(Default::default()),
-        priority: Default::default(),
-        effective_start: Some(Default::default()),
-        effective_end: Some(Default::default()),
-        status: Default::default(),
-        description: Some(Default::default()),
-        created_at: Some(Default::default()),
-        updated_at: Some(Default::default()),
-    };
-    let _ = RBatis::sync(&conn, mapper, &table, "ai_hub_price_rule").await;
-
     // 用途：同步API密钥表结构
     // 说明：管理用户的API密钥和权限控制
     let table = ApiKey {
@@ -290,20 +197,6 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
         updated_at: Some(Default::default()),
     };
     let _ = RBatis::sync(&conn, mapper, &table, "api_key").await;
-
-    // 用途：同步计费标准表结构
-    // 说明：管理AI模型的计费标准
-    let table = Pricing {
-        id: Some(Default::default()),
-        model_id: Default::default(),
-        input_price: Default::default(),
-        output_price: Default::default(),
-        status: Default::default(),
-        description: Some(Default::default()),
-        created_at: Some(Default::default()),
-        updated_at: Some(Default::default()),
-    };
-    let _ = RBatis::sync(&conn, mapper, &table, "pricing").await;
 
     // 用途：同步交易表结构
     // 说明：记录用户余额的所有变更历史，使用自定义表名"user_transaction"避免SQL保留字冲突

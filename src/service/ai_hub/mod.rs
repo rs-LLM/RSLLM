@@ -1,7 +1,3 @@
-// 用途：声明价格规则服务模块
-// 原因：处理价格规则相关业务逻辑
-mod price_rule_service;
-
 // 用途：声明配额管理服务模块
 // 原因：处理用户配额相关业务逻辑
 mod quota_service;
@@ -46,10 +42,6 @@ pub mod provider_factory;
 // 原因：管理AI服务供应商的配置和生命周期
 mod provider_config_service;
 
-// 用途：声明计费标准服务模块
-// 原因：处理AI模型计费标准相关业务逻辑
-mod pricing_service;
-
 // 用途：声明交易服务模块
 // 原因：处理用户余额交易记录相关业务逻辑
 pub mod transaction_service;
@@ -73,10 +65,6 @@ mod api_key_service;
 // 用途：声明速率限制服务模块
 // 原因：处理RPM/TPM速率限制相关业务逻辑
 pub mod rate_limit_service;
-
-// 用途：导出价格规则服务
-// 原因：允许其他模块访问价格规则功能
-pub use price_rule_service::*;
 
 // 用途：导出配额管理服务
 // 原因：允许其他模块访问配额管理功能
@@ -117,10 +105,6 @@ pub use encryption_service::*;
 // 用途：导出供应商配置服务
 // 原因：允许其他模块访问供应商管理功能
 pub use provider_config_service::*;
-
-// 用途：导出计费标准服务
-// 原因：允许其他模块访问计费标准功能
-pub use pricing_service::*;
 
 // 用途：导出交易服务
 // 原因：允许其他模块访问交易功能
@@ -175,8 +159,6 @@ pub use crate::domain::dto::ai_hub::embeddings::*;
 pub use crate::domain::dto::ai_hub::logprob::*;
 // 明确导出DTO streaming类型，避免与VO冲突
 pub use crate::domain::dto::ai_hub::analytics::*;
-pub use crate::domain::dto::ai_hub::price_rule::*;
-pub use crate::domain::dto::ai_hub::pricing::*;
 pub use crate::domain::dto::ai_hub::streaming::{
     ChatCompletionChunk as DtoChatCompletionChunk,
     ChatCompletionChunkChoice as DtoChatCompletionChunkChoice,
@@ -193,7 +175,6 @@ pub use crate::domain::vo::ai_hub::chat::{
     ChatCompletion as VoChatCompletion, ChatCompletionChoice as VoChatCompletionChoice,
 };
 pub use crate::domain::vo::ai_hub::embeddings::*;
-pub use crate::domain::vo::ai_hub::price_rule::*;
 pub use crate::domain::vo::ai_hub::responses::*;
 pub use crate::domain::vo::ai_hub::usage::Usage as VoUsage;
 pub use crate::domain::vo::ai_hub::usage_log::*;

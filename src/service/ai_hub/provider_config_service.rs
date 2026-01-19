@@ -441,6 +441,12 @@ impl ProviderConfigService for ProviderConfigServiceImpl {
             .ok_or_else(|| Error::BusinessError("Provider ID is missing".to_string()))?;
         let provider_code = provider.provider_code.clone();
 
+        // 先删除对应的供应商模型关系
+        let mapping_sql = "DELETE FROM model_provider_mapping WHERE provider_id = ?";
+        rbatis::RBatis::exec(pool!(), mapping_sql, vec![rbs::Value::String(provider_id.clone())])
+            .await
+            .map_err(|e| Error::DatabaseError(e.to_string()))?;
+
         let sql = "DELETE FROM provider_config WHERE id = ?";
         rbatis::RBatis::exec(pool!(), sql, vec![rbs::Value::String(provider_id.clone())])
             .await

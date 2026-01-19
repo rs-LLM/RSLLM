@@ -17,7 +17,6 @@ use crate::domain::vo::response::ApiResponse;
 use crate::domain::vo::usage::Usage;
 use crate::service::BillingService;
 use crate::service::CalculatedFee;
-use crate::service::PriceRuleService;
 use crate::service::{Content, TokenCountMeta, TokenCounter};
 
 /// Responses API接口
@@ -78,19 +77,17 @@ pub async fn create_response(
 
     // 4. 获取动态定价并预消费和配额检查
     let billing_service = &state.billing_service;
-    let price_rule_service = &state.price_rule_service;
 
     // 预估输出token（基于max_tokens或默认值）
     let estimated_output_tokens = req.max_tokens.unwrap_or(500) as i64;
 
-    // 使用PriceRuleService获取动态定价
+    // 获取动态定价
     let fee = match get_dynamic_pricing(
         &user_id,
         &req.model,
         token_meta.input_tokens,
         estimated_output_tokens,
         billing_service,
-        price_rule_service,
         &state.model_router,
         &api_key,
     )
@@ -350,7 +347,6 @@ async fn get_dynamic_pricing(
     input_tokens: i64,
     output_tokens: i64,
     billing_service: &BillingService,
-    _price_rule_service: &PriceRuleService,
     model_router: &crate::routers::model_router::ModelRouter,
     api_key: &str,
 ) -> std::result::Result<CalculatedFee, String> {

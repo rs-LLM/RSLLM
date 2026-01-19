@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::ServiceContext;
 use crate::domain::table::ai_hub::model_base::ModelBase;
+use crate::domain::table::ai_hub::model_provider_mapping::ModelProviderMapping;
 use crate::domain::vo::response::ApiResponse;
 use crate::error::{Error, Result};
 
@@ -282,6 +283,12 @@ pub async fn delete_model(
 ) -> Result<Json<ApiResponse<String>>> {
     let rb = crate::pool!();
 
+    // 先删除对应的供应商模型关系
+    ModelProviderMapping::delete_by_map(rb, rbs::value! { "model_id": &id })
+        .await
+        .map_err(|e| Error::DatabaseError(e.to_string()))?;
+
+    // 再删除模型本身
     ModelBase::delete_by_map(rb, rbs::value! { "id": &id })
         .await
         .map_err(|e| Error::DatabaseError(e.to_string()))?;

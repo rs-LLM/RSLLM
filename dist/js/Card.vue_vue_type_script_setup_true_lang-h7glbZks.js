@@ -1,0 +1,1 @@
+import{e as a,j as o,k as n,n as t,u as c,p as d,q as l}from"../jse/index-index-DhCXvNPy.js";const m=a({__name:"Card",props:{class:{}},setup(e){const r=e;return(s,p)=>(n(),o("div",{class:t(c(d)("rounded-xl border border-border bg-card text-card-foreground",r.class))},[l(s.$slots,"default")],2))}});export{m as _};

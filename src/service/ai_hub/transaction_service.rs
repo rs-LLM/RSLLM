@@ -154,7 +154,7 @@ impl TransactionService {
         dto: QueryTransactionDTO,
         current_user_id: String,
         has_manage_balance: bool,
-    ) -> ApplicationResult<Vec<TransactionVO>> {
+    ) -> ApplicationResult<(Vec<TransactionVO>, usize)> {
         let mut conditions = rbs::value!({});
 
         if !has_manage_balance {
@@ -172,15 +172,22 @@ impl TransactionService {
         let offset = (page - 1) * page_size;
 
         let mut transactions = Transaction::select_by_map(pool!(), conditions.clone()).await?;
+        let total = transactions.len();
 
-        transactions = transactions
+        transactions.sort_by(|a, b| {
+            let a_time = a.created_at.clone().unwrap_or(DateTime::now());
+            let b_time = b.created_at.clone().unwrap_or(DateTime::now());
+            b_time.cmp(&a_time)
+        });
+
+        let paginated_transactions = transactions
             .into_iter()
             .skip(offset as usize)
             .take(page_size as usize)
-            .collect();
+            .collect::<Vec<_>>();
 
         let mut result = Vec::new();
-        for transaction in transactions {
+        for transaction in paginated_transactions {
             let username = if let Ok(users) =
                 SysUser::select_by_map(pool!(), rbs::value! { "id": &transaction.user_id }).await
             {
@@ -232,7 +239,7 @@ impl TransactionService {
             });
         }
 
-        Ok(result)
+        Ok((result, total))
     }
 
     /// 查询用户余额

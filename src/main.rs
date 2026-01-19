@@ -36,6 +36,10 @@ use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable};
 use utoipa_swagger_ui::SwaggerUi;
 
+// 用途：导入信号处理模块
+// 说明：用于捕获 Ctrl+C 和 SIGTERM 信号，实现优雅关闭
+use tokio::signal;
+
 /// 用途：主函数入口
 /// 说明：应用程序的启动点，负责初始化和启动服务器
 #[tokio::main] // 用途：tokio异步运行时宏
@@ -101,7 +105,7 @@ async fn main() -> std::io::Result<()> {
     // 用途：输出服务器地址
     // 说明：告知用户服务器的访问地址
     log::info!(
-        "Serve: http://{}",
+        "Serve: {}",
         CONTEXT.config.server_url.replace("0.0.0.0", "127.0.0.1")
     );
 
@@ -295,6 +299,43 @@ async fn main() -> std::io::Result<()> {
     // 说明：双重保障，确保请求体不超过50MB
 
     // 用途：启动服务器
-    // 说明：开始接受和处理HTTP请求
-    axum::serve(listener, app.into_make_service()).await
+    // 说明：开始接受和处理HTTP请求，支持优雅关闭
+    // 创建优雅关闭信号
+    let shutdown_signal = async {
+        #[cfg(unix)]
+        {
+            // 在 Unix 系统上，同时监听 Ctrl+C 和 SIGTERM 信号
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
+            
+            tokio::select! {
+                _ = signal::ctrl_c() => {
+                    log::info!("[rsllm] Received Ctrl+C signal, initiating graceful shutdown...");
+                }
+                _ = sigterm.recv() => {
+                    log::info!("[rsllm] Received SIGTERM signal, initiating graceful shutdown...");
+                }
+            }
+        }
+        
+        #[cfg(not(unix))]
+        {
+            // 在非 Unix 系统上，只监听 Ctrl+C 信号
+            signal::ctrl_c()
+                .await
+                .expect("Failed to install Ctrl+C handler");
+            log::info!("[rsllm] Received Ctrl+C signal, initiating graceful shutdown...");
+        }
+    };
+
+    // 使用优雅关闭启动服务器
+    axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal)
+        .await?;
+
+    // 用途：优雅关闭日志
+    // 说明：告知用户服务器已正常关闭，数据库连接已自动释放
+    log::info!("[rsllm] Server shutdown completed gracefully. Database connections released.");
+
+    Ok(())
 }
