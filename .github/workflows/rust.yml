@@ -62,19 +62,6 @@ jobs:
           toolchain: stable
           targets: x86_64-pc-windows-msvc
 
-      - name: Setup build environment
-        shell: powershell
-        run: |
-          # 安装必要的工具
-          choco install -y llvm
-          refreshenv
-          
-          # 设置环境变量解决 aws-lc-sys 问题
-          # 尝试使用预编译的绑定
-          echo "AWS_LC_SYS_NO_PREFIX=1" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "AWS_LC_SYS_NO_ASM=1" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "AWS_LC_SYS_USE_PREBUILT=1" | Out-File -FilePath $env:GITHUB_ENV -Append
-
       - name: Build for Windows
         shell: powershell
         run: |
