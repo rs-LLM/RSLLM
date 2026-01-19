@@ -15,7 +15,7 @@ default-run = "rsllm"
 # 启用此选项来开启 storage_s3 或 cache_redis 功能
 default = []
 # 对象存储/S3 支持
-storage_s3 = ["aws-sdk-s3"]
+storage_s3 = []
 # Redis 缓存支持
 cache_redis = ["redis"]
 # Hugging Face tokenizer 支持（用于非OpenAI模型的精确token计算）
@@ -81,7 +81,6 @@ tiktoken-rs = "0.9.1"        # Token计数库（OpenAI模型）
 tokenizers = { version = "0.21", optional = true }  # Hugging Face tokenizer（非OpenAI模型）
 
 # 云存储（可选）
-aws-sdk-s3 = { version = "1.119.0", features = ["rt-tokio","rustls"], optional = true }  # AWS S3 SDK
 async-trait = "0.1.89"     # 异步trait支持
 
 # OpenAPI 文档依赖

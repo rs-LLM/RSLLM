@@ -48,47 +48,7 @@ jobs:
             rsllm-linux-x86_64.tar.gz
             rsllm-linux-x86_64.tar.gz.sha256
 
-  build-windows-gnu:
-    runs-on: ubuntu-latest  # 在 Ubuntu 上交叉编译 Windows 
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          targets: x86_64-pc-windows-gnu
-
-      - name: Install cross-compilation tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            gcc-mingw-w64-x86-64-win32
-
-      - name: Build for Windows (GNU)
-        run: |
-          # 设置环境变量避免 aws-lc-sys 问题
-          export AWS_LC_SYS_NO_PREFIX=1
-          export AWS_LC_SYS_NO_ASM=1
-          export AWS_LC_SYS_SKIP_COMPILER_TESTS=1
-          
-          cargo build --release --target x86_64-pc-windows-gnu
-
-      - name: Package Windows binary
-        run: |
-          cp target/x86_64-pc-windows-gnu/release/rsllm.exe rsllm-windows-x86_64.exe
-          zip -j rsllm-windows-x86_64.zip rsllm-windows-x86_64.exe
-          sha256sum rsllm-windows-x86_64.zip > rsllm-windows-x86_64.zip.sha256
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rsllm-windows-x86_64
-          path: |
-            rsllm-windows-x86_64.zip
-            rsllm-windows-x86_64.zip.sha256
 
   # macOS 64 位构建（Intel 和 ARM）
   build-macos:
