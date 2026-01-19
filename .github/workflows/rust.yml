@@ -48,7 +48,65 @@ jobs:
             rsllm-linux-x86_64.tar.gz
             rsllm-linux-x86_64.tar.gz.sha256
 
+  # Windows 64 位构建
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup build environment
+        shell: powershell
+        run: |
+          # 安装必要的工具
+          choco install -y llvm
+          refreshenv
+          
+          # 设置环境变量解决 aws-lc-sys 问题
+          # 尝试使用预编译的绑定
+          echo "AWS_LC_SYS_NO_PREFIX=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "AWS_LC_SYS_NO_ASM=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "AWS_LC_SYS_USE_PREBUILT=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build for Windows
+        shell: powershell
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Package Windows binary
+        shell: powershell
+        run: |
+          # 检查二进制文件是否存在
+          if (Test-Path "target\x86_64-pc-windows-msvc\release\rsllm.exe") {
+            # 复制文件
+            Copy-Item "target\x86_64-pc-windows-msvc\release\rsllm.exe" "rsllm-windows-x86_64.exe"
+            
+            # 压缩
+            Compress-Archive -Path "rsllm-windows-x86_64.exe" -DestinationPath "rsllm-windows-x86_64.zip" -Force
+            
+            # 生成 SHA256
+            $hash = (Get-FileHash "rsllm-windows-x86_64.zip" -Algorithm SHA256).Hash
+            $hash | Out-File -Encoding ASCII "rsllm-windows-x86_64.zip.sha256"
+          } else {
+            Write-Error "Binary not found at: target\x86_64-pc-windows-msvc\release\rsllm.exe"
+            Get-ChildItem -Recurse target
+            exit 1
+          }
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rsllm-windows-x86_64
+          path: |
+            rsllm-windows-x86_64.zip
+            rsllm-windows-x86_64.zip.sha256
 
   # macOS 64 位构建（Intel 和 ARM）
   build-macos:
