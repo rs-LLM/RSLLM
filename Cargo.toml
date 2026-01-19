@@ -59,7 +59,7 @@ mime_guess = "2.0"  # MIME类型猜测
 redis = { version = "1.0.2", features = ["tokio-comp"] ,optional = true}  # Redis客户端（可选）
 
 # 安全相关
-jsonwebtoken = { version = "10.2.0", features = ["use_pem", "aws_lc_rs"] }        # JWT令牌处理
+jsonwebtoken = { version = "10.2.0", features = ["use_pem", "rust_crypto"] }        # JWT令牌处理
 md5 = "0.8.0"                 # MD5哈希算法
 captcha = "1.0.0"           # 验证码生成
 sha2 = "0.10.9"               # SHA2哈希算法
