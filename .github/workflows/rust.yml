@@ -1,4 +1,4 @@
-name: Build and Release RSLLM
+name: Build and Release RSLLM (64-bit only)
 
 on:
   push:
@@ -9,58 +9,48 @@ on:
     types: [created]
 
 jobs:
-  # Linux 构建 (使用 Docker)
+  # Linux 64 位构建
   build-linux:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64, i686]
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build for Linux (${{ matrix.arch }})
-        uses: docker/build-push-action@v5
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          context: .
-          platforms: linux/${{ matrix.arch }}
-          outputs: type=docker,dest=/tmp/rsllm-linux-${{ matrix.arch }}.tar
-          tags: rsllm:linux-${{ matrix.arch }}
-          build-args: |
-            TARGET=${{ matrix.arch }}-unknown-linux-gnu
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
 
-      - name: Extract binary from Docker image
+      - name: Install system dependencies
         run: |
-          # 加载Docker镜像
-          docker load --input /tmp/rsllm-linux-${{ matrix.arch }}.tar
-          
-          # 创建容器并复制二进制文件
-          CONTAINER_ID=$(docker create rsllm:linux-${{ matrix.arch }})
-          docker cp $CONTAINER_ID:/usr/local/bin/rsllm ./rsllm-linux-${{ matrix.arch }}
-          docker rm $CONTAINER_ID
-          
-          # 打包
-          tar -czvf rsllm-linux-${{ matrix.arch }}.tar.gz rsllm-linux-${{ matrix.arch }}
-          sha256sum rsllm-linux-${{ matrix.arch }}.tar.gz > rsllm-linux-${{ matrix.arch }}.tar.gz.sha256
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev
 
-      - name: Upload Linux artifacts
+      - name: Build for Linux
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Package Linux binary
+        run: |
+          cp target/x86_64-unknown-linux-gnu/release/rsllm rsllm-linux-x86_64
+          tar -czvf rsllm-linux-x86_64.tar.gz rsllm-linux-x86_64
+          sha256sum rsllm-linux-x86_64.tar.gz > rsllm-linux-x86_64.tar.gz.sha256
+
+      - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rsllm-linux-${{ matrix.arch }}
+          name: rsllm-linux-x86_64
           path: |
-            rsllm-linux-${{ matrix.arch }}.tar.gz
-            rsllm-linux-${{ matrix.arch }}.tar.gz.sha256
+            rsllm-linux-x86_64.tar.gz
+            rsllm-linux-x86_64.tar.gz.sha256
 
-  # Windows 构建 (原生)
+  # Windows 64 位构建
   build-windows:
     runs-on: windows-latest
-    strategy:
-      matrix:
-        target: [x86_64-pc-windows-msvc, i686-pc-windows-msvc]
     
     steps:
       - name: Checkout code
@@ -70,56 +60,57 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
-      - name: Install Windows dependencies
+      - name: Setup build environment
+        shell: powershell
         run: |
-          # 安装Windows构建工具
+          # 安装必要的工具
           choco install -y llvm
           refreshenv
-
-      - name: Set environment variables for aws-lc-sys
-        run: |
-          # 设置环境变量来解决aws-lc-sys问题
+          
+          # 设置环境变量解决 aws-lc-sys 问题
+          # 尝试使用预编译的绑定
           echo "AWS_LC_SYS_NO_PREFIX=1" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "AWS_LC_SYS_NO_ASM=1" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "AWS_LC_SYS_USE_PREBUILT=1" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Build Windows binary
+      - name: Build for Windows
+        shell: powershell
         run: |
-          cargo build --release --target ${{ matrix.target }}
-          
-          # 根据架构确定文件名
-          if ("${{ matrix.target }}" -eq "x86_64-pc-windows-msvc") {
-            $arch = "x86_64"
-          } else {
-            $arch = "i686"
-          }
-          
-          # 复制二进制文件
-          Copy-Item "target\${{ matrix.target }}\release\rsllm.exe" "rsllm-windows-$arch.exe"
-          
-          # 压缩
-          Compress-Archive -Path "rsllm-windows-$arch.exe" -DestinationPath "rsllm-windows-$arch.zip" -Force
-          
-          # 计算SHA256
-          $hash = (Get-FileHash "rsllm-windows-$arch.zip" -Algorithm SHA256).Hash
-          $hash | Out-File -Encoding ASCII "rsllm-windows-$arch.zip.sha256"
+          cargo build --release --target x86_64-pc-windows-msvc
 
-      - name: Upload Windows artifacts
+      - name: Package Windows binary
+        shell: powershell
+        run: |
+          # 检查二进制文件是否存在
+          if (Test-Path "target\x86_64-pc-windows-msvc\release\rsllm.exe") {
+            # 复制文件
+            Copy-Item "target\x86_64-pc-windows-msvc\release\rsllm.exe" "rsllm-windows-x86_64.exe"
+            
+            # 压缩
+            Compress-Archive -Path "rsllm-windows-x86_64.exe" -DestinationPath "rsllm-windows-x86_64.zip" -Force
+            
+            # 生成 SHA256
+            $hash = (Get-FileHash "rsllm-windows-x86_64.zip" -Algorithm SHA256).Hash
+            $hash | Out-File -Encoding ASCII "rsllm-windows-x86_64.zip.sha256"
+          } else {
+            Write-Error "Binary not found at: target\x86_64-pc-windows-msvc\release\rsllm.exe"
+            Get-ChildItem -Recurse target
+            exit 1
+          }
+
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rsllm-windows-${{ matrix.target }}
+          name: rsllm-windows-x86_64
           path: |
-            rsllm-windows-*.zip
-            rsllm-windows-*.sha256
+            rsllm-windows-x86_64.zip
+            rsllm-windows-x86_64.zip.sha256
 
-  # macOS 构建 (原生)
+  # macOS 64 位构建（Intel 和 ARM）
   build-macos:
     runs-on: macos-latest
-    strategy:
-      matrix:
-        target: [x86_64-apple-darwin, aarch64-apple-darwin]
     
     steps:
       - name: Checkout code
@@ -129,39 +120,39 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: ${{ matrix.target }}
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
 
-      - name: Install macOS dependencies
+      - name: Install system dependencies
         run: |
-          # 安装必要的开发工具
-          brew install pkg-config
-          brew install openssl@3
+          brew install pkg-config openssl@3
 
-      - name: Build macOS binary
+      - name: Build for macOS Intel
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Build for macOS ARM
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Package macOS binaries
         run: |
-          # 设置OpenSSL路径
-          export PKG_CONFIG_PATH="/usr/local/opt/openssl@3/lib/pkgconfig"
-          cargo build --release --target ${{ matrix.target }}
+          # Intel Mac
+          cp target/x86_64-apple-darwin/release/rsllm rsllm-macos-x86_64
+          tar -czvf rsllm-macos-x86_64.tar.gz rsllm-macos-x86_64
+          shasum -a 256 rsllm-macos-x86_64.tar.gz > rsllm-macos-x86_64.tar.gz.sha256
           
-          # 确定架构和文件名
-          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
-            arch="x86_64"
-          else
-            arch="aarch64"
-          fi
-          
-          # 复制并打包
-          cp target/${{ matrix.target }}/release/rsllm rsllm-macos-$arch
-          tar -czvf rsllm-macos-$arch.tar.gz rsllm-macos-$arch
-          shasum -a 256 rsllm-macos-$arch.tar.gz > rsllm-macos-$arch.tar.gz.sha256
+          # ARM Mac
+          cp target/aarch64-apple-darwin/release/rsllm rsllm-macos-aarch64
+          tar -czvf rsllm-macos-aarch64.tar.gz rsllm-macos-aarch64
+          shasum -a 256 rsllm-macos-aarch64.tar.gz > rsllm-macos-aarch64.tar.gz.sha256
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rsllm-macos-${{ matrix.target }}
+          name: rsllm-macos
           path: |
-            rsllm-macos-*.tar.gz
-            rsllm-macos-*.sha256
+            rsllm-macos-x86_64.tar.gz
+            rsllm-macos-x86_64.tar.gz.sha256
+            rsllm-macos-aarch64.tar.gz
+            rsllm-macos-aarch64.tar.gz.sha256
 
   # 发布到 GitHub Release
   release:
