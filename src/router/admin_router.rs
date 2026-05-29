@@ -36,8 +36,52 @@ pub fn create_admin_router() -> Router<Arc<ServiceContext>> {
             "/admin/providers/{id}",
             delete(provider_config_controller::delete_provider),
         )
+        .route(
+            "/admin/providers/{id}/oauth/start",
+            post(provider_config_controller::start_provider_oauth),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/callback",
+            post(provider_config_controller::complete_provider_oauth),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/device/poll",
+            post(provider_config_controller::poll_provider_oauth_device),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/disconnect",
+            post(provider_config_controller::disconnect_provider_oauth),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/accounts",
+            put(provider_config_controller::update_provider_oauth_accounts),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/accounts/import",
+            post(provider_config_controller::import_provider_oauth_accounts),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/accounts/import/zip",
+            post(provider_config_controller::import_provider_oauth_accounts_zip),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/accounts/refresh-expiry",
+            post(provider_config_controller::refresh_provider_oauth_accounts_expiry),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/accounts/{account_key}/refresh-expiry",
+            post(provider_config_controller::refresh_provider_oauth_account_expiry),
+        )
+        .route(
+            "/admin/providers/{id}/models/scan",
+            post(model_controller::scan_provider_models),
+        )
+        .route(
+            "/admin/providers/{id}/models/import",
+            post(model_controller::import_provider_models),
+        )
         .layer(axum::middleware::from_fn(require_permission(
-            "sys:provider:edit",
+            "ai:provider:edit",
         )));
 
     let model_management_routes = Router::new()
@@ -57,7 +101,7 @@ pub fn create_admin_router() -> Router<Arc<ServiceContext>> {
             delete(model_provider_mapping_controller::delete_model_provider_mapping),
         )
         .layer(axum::middleware::from_fn(require_permission(
-            "sys:model:edit",
+            "ai:model:edit",
         )));
 
     let view_permission_routes = Router::new()
@@ -72,6 +116,14 @@ pub fn create_admin_router() -> Router<Arc<ServiceContext>> {
         .route(
             "/admin/providers/name/{name}",
             get(provider_config_controller::get_provider_by_name),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/status",
+            get(provider_config_controller::get_provider_oauth_status),
+        )
+        .route(
+            "/admin/providers/{id}/oauth/accounts/export",
+            get(provider_config_controller::export_provider_oauth_accounts),
         )
         .route("/admin/models", get(model_controller::list_models))
         .route("/admin/models/{id}", get(model_controller::get_model))

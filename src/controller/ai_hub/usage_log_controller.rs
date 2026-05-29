@@ -10,11 +10,35 @@ use std::sync::Arc;
 use crate::context::ServiceContext;
 use crate::domain::vo::ai_hub::usage_log::{AiHubUsageLogVO, CostDetailVO, UsageStatisticsVO};
 use crate::domain::vo::response::ApiResponse;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::middleware::auth_axum::JwtAuth;
 use crate::service::ai_hub::{UsageLogQueryDTO, UsageStatisticsQueryDTO};
 
 use axum::debug_handler;
+
+fn resolve_page(page: Option<i64>) -> Result<i64> {
+    let page = page.unwrap_or(1);
+    if page < 1 {
+        return Err(Error::ValidationError(format!(
+            "page must be >= 1, got {}",
+            page
+        )));
+    }
+
+    Ok(page)
+}
+
+fn resolve_page_size(page_size: Option<i64>) -> Result<i64> {
+    let page_size = page_size.unwrap_or(20);
+    if page_size < 1 {
+        return Err(Error::ValidationError(format!(
+            "page_size must be >= 1, got {}",
+            page_size
+        )));
+    }
+
+    Ok(page_size)
+}
 
 /// 查询用量记录列表
 ///
@@ -48,6 +72,8 @@ pub async fn list_usage_logs(
     Query(params): Query<UsageLogQueryDTO>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>> {
     let user_id = jwt.id.to_string();
+    let page = resolve_page(params.page)?;
+    let page_size = resolve_page_size(params.page_size)?;
 
     let query_dto = UsageLogQueryDTO {
         user_id: Some(user_id.to_string()),
@@ -57,8 +83,8 @@ pub async fn list_usage_logs(
         status: params.status,
         start_time: params.start_time,
         end_time: params.end_time,
-        page: Some(params.page.unwrap_or(1)),
-        page_size: Some(params.page_size.unwrap_or(20)),
+        page: Some(page),
+        page_size: Some(page_size),
     };
 
     let logs = state.usage_log_service.list_usage_logs(query_dto).await?;

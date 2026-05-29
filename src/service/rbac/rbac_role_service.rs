@@ -14,11 +14,11 @@ use crate::domain::table::rbac::IntoMap;
 // 说明：用于数据库操作
 use crate::domain::table::rbac::{RbacPermission, RbacRole, RbacRolePermission};
 
-// 用途：导入权限VO
+// 用途：导入权限视图对象
 // 说明：用于返回权限数据
 use crate::domain::vo::rbac::RbacPermissionVO;
 
-// 用途：导入角色VO
+// 用途：导入角色视图对象
 // 说明：用于返回角色数据
 use crate::domain::vo::rbac::SysRoleVO;
 
@@ -105,12 +105,12 @@ impl RbacRoleService {
             map
         };
 
-        // 用途：转换为角色VO分页
-        // 说明：将数据库实体转换为前端需要的VO
+        // 用途：转换为角色视图对象分页
+        // 说明：将数据库实体转换为前端需要的视图对象
         let mut page = Page::<SysRoleVO>::from(data);
 
         // 用途：为每个角色设置权限
-        // 说明：将权限信息添加到角色VO中
+        // 说明：将权限信息添加到角色视图对象中
         for vo in &mut page.records {
             if let Some(perms) = role_perms.get(vo.id.as_deref().unwrap_or_default()) {
                 vo.set_permissions(

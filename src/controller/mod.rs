@@ -1,8 +1,13 @@
 pub mod img_controller;
 pub mod init_controller;
 pub mod rbac;
+pub mod status_controller;
 pub use rbac::*;
 pub mod sys;
 pub use sys::*;
 pub mod ai_hub;
 pub use ai_hub::*;
+pub mod scheduled_task;
+pub use scheduled_task::*;
+pub mod hook;
+pub use hook::*;

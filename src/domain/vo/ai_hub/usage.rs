@@ -1,3 +1,6 @@
+//! 用量统计视图对象模块。
+//! 定义聊天与嵌入场景的 token 使用量统计结构，供 AI Hub 接口对外返回。
+
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据传输
 use serde::{Deserialize, Serialize};
@@ -5,8 +8,8 @@ use serde::{Deserialize, Serialize};
 // 说明：用于自动生成API文档
 use utoipa::ToSchema;
 
-// 用途：使用统计结构体
-// 说明：用于统计AI模型生成过程中的资源使用情况
+/// 通用使用统计结构体。
+/// 表示文本生成类请求的输入、输出与总 token 消耗。
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct Usage {
     // 用途：提示词令牌数量
@@ -20,8 +23,8 @@ pub struct Usage {
     pub total_tokens: u32,
 }
 
-// 用途：嵌入使用统计结构体
-// 说明：用于统计嵌入生成过程中的资源使用情况
+/// 嵌入使用统计结构体。
+/// 表示嵌入请求的输入与总 token 消耗。
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct EmbeddingUsage {
     // 用途：输入令牌数量

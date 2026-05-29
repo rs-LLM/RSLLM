@@ -9,8 +9,6 @@ use crate::domain::vo::ai_hub::BalanceVO;
 use crate::domain::vo::response::ApiResponse;
 use crate::error::ApplicationResult;
 use crate::middleware::auth_axum::JwtAuth;
-use crate::service::ai_hub::BalanceService;
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct GetBalanceRequest {
     pub user_id: String,
@@ -39,11 +37,10 @@ pub struct DeductResponse {
     tag = "balance"
 )]
 pub async fn get_balance(
-    State(_ctx): State<Arc<ServiceContext>>,
+    State(ctx): State<Arc<ServiceContext>>,
     Json(req): Json<GetBalanceRequest>,
 ) -> ApplicationResult<Json<ApiResponse<BalanceVO>>> {
-    let balance_service = BalanceService::new();
-    let balance = balance_service.get_balance(&req.user_id).await?;
+    let balance = ctx.balance_service.get_balance(&req.user_id).await?;
 
     Ok(Json(ApiResponse::success(balance)))
 }
@@ -61,13 +58,12 @@ pub async fn get_balance(
     tag = "balance"
 )]
 pub async fn recharge(
-    State(_ctx): State<Arc<ServiceContext>>,
+    State(ctx): State<Arc<ServiceContext>>,
     jwt_auth: JwtAuth,
     Json(req): Json<RechargeDTO>,
 ) -> ApplicationResult<Json<ApiResponse<RechargeResponse>>> {
     let operator_id = Some(jwt_auth.id.clone());
-    let balance_service = BalanceService::new();
-    let transaction_id = balance_service.recharge(req, operator_id).await?;
+    let transaction_id = ctx.balance_service.recharge(req, operator_id).await?;
 
     Ok(Json(ApiResponse::success(RechargeResponse {
         transaction_id,
@@ -87,11 +83,10 @@ pub async fn recharge(
     tag = "balance"
 )]
 pub async fn deduct(
-    State(_ctx): State<Arc<ServiceContext>>,
+    State(ctx): State<Arc<ServiceContext>>,
     Json(req): Json<DeductDTO>,
 ) -> ApplicationResult<Json<ApiResponse<DeductResponse>>> {
-    let balance_service = BalanceService::new();
-    let transaction_id = balance_service.deduct(req).await?;
+    let transaction_id = ctx.balance_service.deduct(req).await?;
 
     Ok(Json(ApiResponse::success(DeductResponse {
         transaction_id,
@@ -111,13 +106,12 @@ pub async fn deduct(
     tag = "balance"
 )]
 pub async fn set_balance(
-    State(_ctx): State<Arc<ServiceContext>>,
+    State(ctx): State<Arc<ServiceContext>>,
     jwt_auth: JwtAuth,
     Json(req): Json<SetBalanceDTO>,
 ) -> ApplicationResult<Json<ApiResponse<RechargeResponse>>> {
     let operator_id = Some(jwt_auth.id.clone());
-    let balance_service = BalanceService::new();
-    let transaction_id = balance_service.set_balance(req, operator_id).await?;
+    let transaction_id = ctx.balance_service.set_balance(req, operator_id).await?;
 
     Ok(Json(ApiResponse::success(RechargeResponse {
         transaction_id,

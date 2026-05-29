@@ -51,6 +51,8 @@ impl Default for UserStatsCache {
 }
 
 impl UserStatsService {
+    const TOP_N: usize = 10;
+
     /// 创建新的统计服务实例
     pub fn new() -> Self {
         Self {
@@ -152,6 +154,37 @@ impl UserStatsService {
         let total_output_tokens: i64 = usage_logs.iter().map(|l| l.output_tokens).sum();
         let total_tokens: i64 = usage_logs.iter().map(|l| l.total_tokens).sum();
         let total_cost: f64 = usage_logs.iter().map(|l| l.total_cost).sum();
+        let total_requests = usage_logs.len() as i64;
+        let successful_requests = usage_logs
+            .iter()
+            .filter(|l| l.status.as_deref() == Some("success"))
+            .count() as i64;
+        let failed_requests = total_requests - successful_requests;
+        let success_rate = Self::calc_success_rate(successful_requests, total_requests);
+        let avg_response_time_ms = Self::calc_avg_response_time_ms(&usage_logs);
+
+        let model_summary = self.aggregate_dimension(
+            &usage_logs,
+            |log| {
+                if log.model_id.is_empty() {
+                    "unknown".to_string()
+                } else {
+                    log.model_id.clone()
+                }
+            },
+            Self::TOP_N,
+        );
+        let provider_summary =
+            self.aggregate_dimension(&usage_logs, |log| self.extract_provider(log), Self::TOP_N);
+        let request_type_summary = self.aggregate_dimension(
+            &usage_logs,
+            |log| {
+                log.request_type
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string())
+            },
+            Self::TOP_N,
+        );
 
         Ok(UserStatsVO {
             user_id: user_id.to_string(),
@@ -161,6 +194,14 @@ impl UserStatsService {
             total_output_tokens,
             total_tokens,
             updated_at: DateTime::now().to_string(),
+            total_requests,
+            successful_requests,
+            failed_requests,
+            success_rate,
+            avg_response_time_ms,
+            model_summary,
+            provider_summary,
+            request_type_summary,
         })
     }
 
@@ -182,6 +223,7 @@ impl UserStatsService {
 
         // 按时间分组统计
         let mut tokens_by_time: HashMap<String, UserTrendDataPointVO> = HashMap::new();
+        let mut response_time_by_time: HashMap<String, (i64, i64)> = HashMap::new();
 
         for log in &usage_logs {
             if let Some(created_at) = &log.created_at {
@@ -197,11 +239,39 @@ impl UserStatsService {
                             output_tokens: 0,
                             total_tokens: 0,
                             cost: 0.0,
+                            request_count: 0,
+                            successful_count: 0,
+                            failed_count: 0,
+                            success_rate: 0.0,
+                            avg_response_time_ms: 0.0,
                         });
                 entry.input_tokens += log.input_tokens;
                 entry.output_tokens += log.output_tokens;
                 entry.total_tokens += log.total_tokens;
                 entry.cost += log.total_cost;
+                entry.request_count += 1;
+                if log.status.as_deref() == Some("success") {
+                    entry.successful_count += 1;
+                } else {
+                    entry.failed_count += 1;
+                }
+                if let Some(rt) = log.response_time_ms {
+                    let rt_entry = response_time_by_time.entry(time_key).or_insert((0, 0));
+                    rt_entry.0 += rt;
+                    rt_entry.1 += 1;
+                }
+            }
+        }
+
+        for (key, point) in &mut tokens_by_time {
+            point.success_rate =
+                Self::calc_success_rate(point.successful_count, point.request_count);
+            if let Some((sum, count)) = response_time_by_time.get(key) {
+                point.avg_response_time_ms = if *count > 0 {
+                    *sum as f64 / *count as f64
+                } else {
+                    0.0
+                };
             }
         }
 
@@ -211,12 +281,18 @@ impl UserStatsService {
         // 填充缺失的数据点
         let token_trend = self.fill_missing_data_points(time_keys.clone(), &tokens_by_time);
         let cost_trend = self.fill_missing_data_points(time_keys, &tokens_by_time);
+        let request_trend = token_trend.clone();
+        let success_rate_trend = token_trend.clone();
+        let avg_response_time_trend = token_trend.clone();
 
         Ok(UserTrendStatsVO {
             user_id: user_id.to_string(),
             dimension,
             token_trend,
             cost_trend,
+            request_trend,
+            success_rate_trend,
+            avg_response_time_trend,
             updated_at: DateTime::now().to_string(),
         })
     }
@@ -305,9 +381,115 @@ impl UserStatsService {
                     output_tokens: 0,
                     total_tokens: 0,
                     cost: 0.0,
+                    request_count: 0,
+                    successful_count: 0,
+                    failed_count: 0,
+                    success_rate: 0.0,
+                    avg_response_time_ms: 0.0,
                 })
             })
             .collect()
+    }
+
+    fn calc_success_rate(successful_requests: i64, total_requests: i64) -> f64 {
+        if total_requests > 0 {
+            (successful_requests as f64 / total_requests as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
+
+    fn calc_avg_response_time_ms(logs: &[AiHubUsageLog]) -> f64 {
+        let mut sum = 0_i64;
+        let mut count = 0_i64;
+        for log in logs {
+            if let Some(rt) = log.response_time_ms {
+                sum += rt;
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            sum as f64 / count as f64
+        } else {
+            0.0
+        }
+    }
+
+    fn aggregate_dimension<F>(
+        &self,
+        usage_logs: &[AiHubUsageLog],
+        key_extractor: F,
+        top_n: usize,
+    ) -> Vec<UserDimensionAggregationVO>
+    where
+        F: Fn(&AiHubUsageLog) -> String,
+    {
+        let mut stats: HashMap<String, (i64, i64, i64, i64, f64, i64, i64)> = HashMap::new();
+
+        for log in usage_logs {
+            let key = key_extractor(log);
+            let entry = stats.entry(key).or_insert((0, 0, 0, 0, 0.0, 0, 0));
+            entry.0 += 1;
+            if log.status.as_deref() == Some("success") {
+                entry.1 += 1;
+            } else {
+                entry.2 += 1;
+            }
+            entry.3 += log.total_tokens;
+            entry.4 += log.total_cost;
+            if let Some(rt) = log.response_time_ms {
+                entry.5 += rt;
+                entry.6 += 1;
+            }
+        }
+
+        let mut result: Vec<UserDimensionAggregationVO> = stats
+            .into_iter()
+            .map(|(key, item)| UserDimensionAggregationVO {
+                key,
+                request_count: item.0,
+                successful_count: item.1,
+                failed_count: item.2,
+                success_rate: Self::calc_success_rate(item.1, item.0),
+                total_tokens: item.3,
+                total_cost: item.4,
+                avg_response_time_ms: if item.6 > 0 {
+                    item.5 as f64 / item.6 as f64
+                } else {
+                    0.0
+                },
+            })
+            .collect();
+
+        result.sort_by(|a, b| {
+            b.request_count
+                .cmp(&a.request_count)
+                .then_with(|| a.key.cmp(&b.key))
+        });
+        result.truncate(top_n);
+        result
+    }
+
+    fn extract_provider(&self, log: &AiHubUsageLog) -> String {
+        if let Some(extra) = &log.extra {
+            if let Some(provider) = extra.get("provider").and_then(|v| v.as_str()) {
+                return provider.to_string();
+            }
+        }
+
+        let model_id = log.model_id.as_str();
+        if let Some((provider, _)) = model_id.split_once('/') {
+            if !provider.is_empty() {
+                return provider.to_string();
+            }
+        }
+        if let Some((provider, _)) = model_id.split_once(':') {
+            if !provider.is_empty() {
+                return provider.to_string();
+            }
+        }
+        "unknown".to_string()
     }
 
     /// 获取时间键

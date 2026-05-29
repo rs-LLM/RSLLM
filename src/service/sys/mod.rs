@@ -10,17 +10,15 @@ mod sys_dict_service;
 // 原因：处理组织相关业务逻辑，如组织的增删改查和树形结构构建
 mod sys_organization_service;
 
-// 用途：声明系统短信服务模块
-// 原因：处理短信发送相关业务逻辑
-mod sys_sms_service;
-
 // 用途：声明系统回收站服务模块
 // 原因：处理回收站相关业务逻辑，如数据的软删除和恢复
 mod sys_trash_service;
 
 // 用途：声明系统用户服务模块
 // 原因：处理用户相关业务逻辑，如用户的登录、注册、信息管理
+mod register_policy_service;
 mod sys_user_service;
+mod twofa_service;
 
 // 用途：导出系统认证服务
 // 原因：允许其他模块访问认证功能
@@ -34,14 +32,12 @@ pub use sys_dict_service::*;
 // 原因：允许其他模块访问组织功能
 pub use sys_organization_service::*;
 
-// 用途：导出系统短信服务
-// 原因：允许其他模块访问短信发送功能
-pub use sys_sms_service::*;
-
 // 用途：导出系统回收站服务
 // 原因：允许其他模块访问回收站功能
 pub use sys_trash_service::*;
 
 // 用途：导出系统用户服务
 // 原因：允许其他模块访问用户相关功能
+pub use register_policy_service::*;
 pub use sys_user_service::*;
+pub use twofa_service::*;

@@ -1,0 +1,7 @@
+<%% let table_name = "task_execution_record"; %>
+<%% if method_name == "select_by_task_id" { %>
+SELECT * FROM task_execution_record WHERE task_id = #{task_id} ORDER BY created_at DESC
+<%% } %>
+<%% if method_name == "select_all" { %>
+SELECT * FROM task_execution_record ORDER BY created_at DESC
+<%% } %>

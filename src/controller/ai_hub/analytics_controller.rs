@@ -1,8 +1,6 @@
 //! 统计分析控制器模块
 //! 提供用量统计、性能分析等API接口
 
-use axum::{Json, extract::Query, http::HeaderMap};
-
 use crate::domain::dto::ai_hub::analytics::{
     PerformanceTrendsQueryDTO, SystemStatsQueryDTO, UserUsageStatsQueryDTO,
 };
@@ -13,6 +11,7 @@ use crate::domain::vo::ai_hub::analytics::{
 use crate::domain::vo::response::ApiResponse;
 use crate::error::Result;
 use crate::service::AnalyticsService;
+use axum::{Json, extract::Query, http::HeaderMap};
 
 use axum::debug_handler;
 

@@ -10,7 +10,7 @@ use crate::domain::dto::basic::sys_organization::{OrgAddDTO, OrgEditDTO, OrgPage
 // 说明：用于数据库操作
 use crate::domain::table::basic::sys_organization::SysOrganization;
 
-// 用途：导入组织VO
+// 用途：导入组织视图对象
 // 说明：用于返回组织数据
 use crate::domain::vo::basic::sys_organization::{OrganizationTreeNodeVO, SysOrganizationVO};
 
@@ -50,8 +50,8 @@ impl SysOrganizationService {
         // 用途：查询组织分页数据
         // 说明：根据查询条件从数据库中获取分页数据
         let page = SysOrganization::select_page(pool!(), &PageRequest::from(arg), arg).await?;
-        // 用途：转换为VO分页
-        // 说明：将数据库实体转换为前端需要的VO
+        // 用途：转换为视图对象分页
+        // 说明：将数据库实体转换为前端需要的视图对象
         let page_vo = Page::<SysOrganizationVO>::from(page);
         // 用途：返回分页结果
         // 说明：告知调用者查询成功并返回数据
@@ -132,11 +132,11 @@ impl SysOrganizationService {
         // 用途：查询所有组织数据
         // 说明：从数据库中获取所有组织
         let all = SysOrganization::select_all_custom(pool!()).await?;
-        // 用途：转换为VO列表
+        // 用途：转换为视图对象列表
         // 说明：将数据库实体转换为视图对象
         let vo_list: Vec<SysOrganizationVO> =
             all.into_iter().map(SysOrganizationVO::from).collect();
-        // 用途：返回VO列表
+        // 用途：返回视图对象列表
         // 说明：告知调用者查询成功并返回数据
         Ok(vo_list)
     }
@@ -151,10 +151,10 @@ impl SysOrganizationService {
             .into_iter()
             .next()
             .ok_or_else(|| Error::from("组织不存在"))?;
-        // 用途：转换为VO
+        // 用途：转换为视图对象
         // 说明：将数据库实体转换为视图对象
         let vo = SysOrganizationVO::from(org);
-        // 用途：返回VO
+        // 用途：返回视图对象
         // 说明：告知调用者查询成功并返回数据
         Ok(vo)
     }

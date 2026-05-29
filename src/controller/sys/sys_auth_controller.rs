@@ -14,17 +14,21 @@ use crate::domain::dto::basic::sign_in::SignInDTO;
 // 说明：用于OpenAPI文档生成
 use crate::domain::vo::response::ApiResponse;
 
-// 用途：导入JWT令牌VO
+// 用途：导入JWT令牌视图对象
 // 说明：用于返回认证结果
 use crate::domain::vo::JWTToken;
 
-// 用途：导入登录VO
+// 用途：导入登录视图对象
 // 说明：用于返回登录结果
 use crate::domain::vo::basic::LoginVO;
 
-// 用途：导入刷新Token响应VO
-// 说明：用于返回刷新Token结果
-// use crate::domain::vo::basic::RefreshTokenVO;
+// 用途：导入2FA控制器
+// 说明：用于统一处理登录二次验证响应
+use crate::controller::sys::twofa_controller;
+
+// 用途：导入2FA服务
+// 说明：用于登录时判定是否需要二次验证
+use crate::service::sys::{SignInResult, TwoFaService};
 
 // 用途：导入axum的Json提取器
 // 说明：用于从HTTP请求体中提取JSON数据
@@ -54,27 +58,37 @@ use crate::middleware::auth_axum::JwtAuth;
     request_body = SignInDTO,
     responses(
         (status = 200, description = "登录成功", body = ApiResponse<LoginVO>),
-        (status = 401, description = "登录失败", body = ApiResponse<LoginVO>)
+        (status = 401, description = "需要2FA挑战或登录失败", body = ApiResponse<crate::controller::sys::twofa_controller::NeedTwoFaResponse>)
     ),
     tag = "auth"
 )]
 pub async fn login(arg: Json<SignInDTO>) -> impl IntoResponse {
-    let result = CONTEXT.sys_user_service.sign_in(&arg.0).await;
     use axum::http::StatusCode;
-    match result {
-        Ok(sign_in_vo) => {
+
+    let service = TwoFaService;
+    match service.sign_in_or_create_challenge(&arg.0).await {
+        Ok(SignInResult::Success(sign_in_vo)) => {
             let vo = LoginVO {
                 access_token: sign_in_vo.access_token,
             };
-            (StatusCode::OK, axum::Json(ApiResponse::success(vo)))
+            (StatusCode::OK, axum::Json(ApiResponse::success(vo))).into_response()
         }
-        Err(e) => {
-            let error_msg = e.to_string();
-            (
-                StatusCode::UNAUTHORIZED,
-                axum::Json(ApiResponse::error("-1", &error_msg)),
-            )
-        }
+        Ok(SignInResult::NeedTwoFa {
+            challenge_id,
+            expires_in,
+        }) => twofa_controller::sign_in_result_to_response(SignInResult::NeedTwoFa {
+            challenge_id,
+            expires_in,
+        })
+        .into_response(),
+        Err(e) => (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(ApiResponse::<serde_json::Value>::error(
+                "-1",
+                &e.to_string(),
+            )),
+        )
+            .into_response(),
     }
 }
 
@@ -105,14 +119,14 @@ pub async fn check(arg: Json<SysAuthDTO>) -> impl IntoResponse {
     }
 }
 
-/// 用途：刷新Token
+/// 用途：刷新令牌信息
 /// 说明：验证当前access_token并延长有效期，返回符合Vben前端期望的格式
 #[utoipa::path(
     post,
     path = "/auth/refresh",
     responses(
-        (status = 200, description = "Token刷新成功", body = ApiResponse<String>),
-        (status = 401, description = "Token无效或已过期", body = ApiResponse<String>)
+        (status = 200, description = "刷新令牌信息成功", body = ApiResponse<String>),
+        (status = 401, description = "访问令牌无效或已过期", body = ApiResponse<String>)
     ),
     tag = "auth"
 )]
@@ -165,7 +179,7 @@ pub async fn refresh_token(req: Request) -> impl IntoResponse {
     path = "/auth/logout",
     responses(
         (status = 200, description = "退出登录成功", body = ApiResponse<String>),
-        (status = 401, description = "Token无效", body = ApiResponse<String>)
+        (status = 401, description = "访问令牌无效", body = ApiResponse<String>)
     ),
     tag = "auth"
 )]
@@ -205,15 +219,24 @@ pub async fn logout(req: Request) -> impl IntoResponse {
     path = "/auth/codes",
     responses(
         (status = 200, description = "获取权限码成功", body = ApiResponse<Vec<String>>),
-        (status = 401, description = "Token无效", body = ApiResponse<Vec<String>>)
+        (status = 401, description = "访问令牌无效", body = ApiResponse<Vec<String>>)
     ),
     tag = "auth"
 )]
 pub async fn get_codes(jwt_auth: JwtAuth) -> impl IntoResponse {
-    let permissions = jwt_auth.permissions.clone();
     use axum::http::StatusCode;
-    (
-        StatusCode::OK,
-        axum::Json(ApiResponse::success(permissions)),
-    )
+    match CONTEXT
+        .sys_user_service
+        .load_level_permission(jwt_auth.id.as_str())
+        .await
+    {
+        Ok(permissions) => (
+            StatusCode::OK,
+            axum::Json(ApiResponse::success(permissions)),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(ApiResponse::error("-1", &e.to_string())),
+        ),
+    }
 }

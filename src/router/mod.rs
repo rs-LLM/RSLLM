@@ -2,34 +2,49 @@
 //!
 //! 该模块负责组织和导出所有路由配置，包括：
 //! - 无认证路由
-//! - 需认证路由  
+//! - 需要认证路由
 //! - 静态资源路由
 
 pub mod admin_router;
 pub mod ai_hub_router;
 pub mod api_key_router;
 pub mod auth_router;
+pub mod hook_router;
 pub mod init_router;
+pub mod model_router;
 pub mod no_auth_router;
+pub mod openai_router;
+pub mod public_router;
 pub mod resource_router;
+pub mod scheduled_task_router;
 pub mod state_router;
 pub mod user_level_model_rate_limit_router;
 pub mod user_level_router;
+pub use model_router::ModelRouter;
 
 pub use admin_router::create_admin_router;
 pub use ai_hub_router::create_ai_hub_router;
 pub use api_key_router::create_api_key_and_rate_limit_router;
 pub use auth_router::create_auth_router;
+pub use hook_router::create_hook_router;
 pub use init_router::create_init_router;
 pub use no_auth_router::create_no_auth_router;
+pub use public_router::create_public_router;
 pub use resource_router::create_resource_router;
+pub use scheduled_task_router::create_scheduled_task_router;
 pub use state_router::create_state_router;
 pub use user_level_model_rate_limit_router::create_user_level_model_rate_limit_router;
 pub use user_level_router::create_user_level_router;
 
 use crate::context::ServiceContext;
-use axum::{body::Body, extract::Request, response::{IntoResponse, Response}, Router};
-use include_dir::{include_dir, Dir};
+use axum::{
+    Router,
+    body::Body,
+    extract::Request,
+    middleware,
+    response::{IntoResponse, Response},
+};
+use include_dir::{Dir, include_dir};
 use std::sync::Arc;
 
 // 嵌入 dist 目录到二进制文件中
@@ -39,7 +54,9 @@ static DIST_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/dist");
 ///
 /// 合并所有路由配置，返回完整的应用路由
 pub fn create_app_router(state: Arc<ServiceContext>) -> Router<()> {
-    Router::new()
+    let router = Router::new()
+        // 兼容 OpenAI/Claude/Gemini 的 /v1 与 /v1beta 路由
+        .merge(openai_router::create_openai_router(state.clone()))
         // 添加统一前缀的路由
         .nest(
             "/api/v1",
@@ -50,14 +67,23 @@ pub fn create_app_router(state: Arc<ServiceContext>) -> Router<()> {
             "/api/v1/chat/completions/ws",
             axum::routing::get(
                 crate::controller::ai_hub::streaming_controller::chat_completions_ws,
-            ),
+            )
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                crate::middleware::quota_check_middleware::quota_check_middleware,
+            ))
+            .with_state(state.clone()),
         )
         // 添加统一前缀的路由
+        .nest("/rsllm/api", create_init_router().with_state(state.clone()))
         .nest(
             "/rsllm/api",
-            create_init_router().with_state(state.clone()),
+            create_no_auth_router().with_state(state.clone()),
         )
-        .nest("/rsllm/api", create_no_auth_router().with_state(state.clone()))
+        .nest(
+            "/rsllm/public",
+            create_public_router().with_state(state.clone()),
+        )
         .nest("/rsllm/api", create_auth_router().with_state(state.clone()))
         .nest(
             "/rsllm/api",
@@ -83,8 +109,13 @@ pub fn create_app_router(state: Arc<ServiceContext>) -> Router<()> {
             "/rsllm/api",
             create_resource_router().with_state(state.clone()),
         )
-        .with_state(state)
-        .fallback_service(axum::routing::get(serve_static_root))
+        .nest(
+            "/rsllm/api",
+            create_scheduled_task_router().with_state(state.clone()),
+        )
+        .nest("/rsllm/api", create_hook_router().with_state(state.clone()));
+
+    router.fallback_service(axum::routing::get(serve_static_root))
 }
 
 /// 服务根路径静态文件

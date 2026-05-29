@@ -2,17 +2,17 @@
 // 说明：用于访问配置信息和服务实例
 use crate::context::CONTEXT;
 // 用途：导入JWT令牌结构体
-// 说明：用于令牌验证和权限检查
+// 说明：用于访问令牌验证和权限检查
 use crate::domain::vo::JWTToken;
 
 // 用途：认证中间件结构体
 // 说明：作为认证相关方法的命名空间
 pub struct Auth;
 
-// 用途：检查令牌的有效性和过期时间
-// 说明：确保只有有效的令牌才能访问受保护的资源
+// 用途：检查访问令牌的有效性和过期时间
+// 说明：确保只有有效的访问令牌才能访问受保护的资源
 pub fn checked_token(token: &str) -> Result<JWTToken, crate::error::Error> {
-    // 用途：验证令牌
+    // 用途：验证访问令牌
     // 说明：检查令牌的签名是否有效以及是否过期
     let token = JWTToken::verify(&CONTEXT.config.jwt_secret, token);
     match token {
@@ -25,7 +25,7 @@ pub fn checked_token(token: &str) -> Result<JWTToken, crate::error::Error> {
 // 说明：检查用户是否有权限访问特定路径
 pub async fn check_auth(token: &JWTToken, path: &str) -> Result<(), crate::error::Error> {
     // 用途：获取所有系统权限
-    // 说明：用于与用户令牌中的权限进行比对
+    // 说明：用于与用户访问令牌中的权限进行比对
     let sys_permission = CONTEXT.rbac_permission_service.finds_all().await?;
     // 用途：遍历用户令牌中的权限
     // 说明：检查用户是否拥有访问指定路径的权限

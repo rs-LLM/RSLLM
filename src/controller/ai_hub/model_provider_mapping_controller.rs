@@ -14,6 +14,31 @@ use crate::domain::table::ai_hub::model_provider_mapping::ModelProviderMapping;
 use crate::domain::vo::response::ApiResponse;
 use crate::error::{Error, Result};
 
+fn resolve_page(page: Option<i64>) -> Result<usize> {
+    let page = page.unwrap_or(1);
+    if page < 1 {
+        return Err(Error::ValidationError(format!(
+            "page must be >= 1, got {}",
+            page
+        )));
+    }
+
+    usize::try_from(page).map_err(|_| Error::ValidationError("page is too large".to_string()))
+}
+
+fn resolve_page_size(page_size: Option<i64>) -> Result<usize> {
+    let page_size = page_size.unwrap_or(10);
+    if page_size < 1 {
+        return Err(Error::ValidationError(format!(
+            "page_size must be >= 1, got {}",
+            page_size
+        )));
+    }
+
+    usize::try_from(page_size)
+        .map_err(|_| Error::ValidationError("page_size is too large".to_string()))
+}
+
 /// 创建模型-供应商映射请求
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CreateModelProviderMappingDTO {
@@ -124,8 +149,8 @@ pub async fn list_model_provider_mappings(
 ) -> Result<Json<ApiResponse<ListMappingsResponse>>> {
     let rb = crate::pool!();
 
-    let page = params.page.unwrap_or(1);
-    let page_size = params.page_size.unwrap_or(10);
+    let page = resolve_page(params.page)?;
+    let page_size = resolve_page_size(params.page_size)?;
 
     let mappings = if let Some(model_id) = params.model_id {
         ModelProviderMapping::select_by_model_id(rb, &model_id)
@@ -142,8 +167,8 @@ pub async fn list_model_provider_mappings(
     };
 
     let total = mappings.len() as i64;
-    let offset = ((page - 1) * page_size) as usize;
-    let end = (offset + page_size as usize).min(mappings.len());
+    let offset = page.saturating_sub(1).saturating_mul(page_size);
+    let end = offset.saturating_add(page_size).min(mappings.len());
 
     let items = if offset >= mappings.len() {
         Vec::new()

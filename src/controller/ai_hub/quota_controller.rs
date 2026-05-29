@@ -13,6 +13,7 @@ use crate::domain::vo::ai_hub::user_quota::{AiHubUserQuotaVO, QuotaOverviewVO};
 use crate::domain::vo::response::ApiResponse;
 use crate::error::{Error, Result};
 use crate::middleware::auth::checked_token;
+use crate::middleware::auth_axum::TOKEN_KEY;
 use crate::service::ai_hub::{CreateQuotaDTO, ListQuotasResponse, QuotaQueryDTO, UpdateQuotaDTO};
 
 use axum::debug_handler;
@@ -41,7 +42,7 @@ pub async fn get_quota_overview(
     headers: HeaderMap,
     State(state): State<Arc<ServiceContext>>,
     Query(params): Query<QuotaQueryDTO>,
-) -> Result<Json<QuotaOverviewVO>> {
+) -> Result<Json<ApiResponse<QuotaOverviewVO>>> {
     // 从请求头获取用户信息（简化实现，实际应从JWT解析）
     let _user_id = headers
         .get("x-user-id")
@@ -50,7 +51,7 @@ pub async fn get_quota_overview(
 
     let user_id = params.user_id.as_deref().unwrap_or(_user_id);
     let quota = state.quota_service.get_overview(user_id).await?;
-    Ok(Json(quota))
+    Ok(Json(ApiResponse::success(quota)))
 }
 
 /// 创建用户配额
@@ -74,10 +75,10 @@ pub async fn get_quota_overview(
 pub async fn create_quota(
     State(state): State<Arc<ServiceContext>>,
     Json(dto): Json<CreateQuotaDTO>,
-) -> Result<Json<AiHubUserQuotaVO>> {
+) -> Result<Json<ApiResponse<AiHubUserQuotaVO>>> {
     let quota_id = state.quota_service.create_quota(dto).await?;
     let quota = state.quota_service.get_quota(&quota_id).await?;
-    Ok(Json(quota))
+    Ok(Json(ApiResponse::success(quota)))
 }
 
 /// 更新用户配额
@@ -103,9 +104,7 @@ pub async fn update_quota(
     headers: HeaderMap,
     State(state): State<Arc<ServiceContext>>,
     Json(dto): Json<UpdateQuotaDTO>,
-) -> Result<Json<AiHubUserQuotaVO>> {
-    const TOKEN_KEY: &str = "Authorization";
-
+) -> Result<Json<ApiResponse<AiHubUserQuotaVO>>> {
     let _current_user_id = if let Some(auth_header) = headers.get(TOKEN_KEY) {
         if let Ok(auth_str) = auth_header.to_str() {
             let token = auth_str.trim_start_matches("Bearer ");
@@ -128,7 +127,7 @@ pub async fn update_quota(
         .update_quota(&dto.id, dto.clone())
         .await?;
     let updated_quota = state.quota_service.get_quota(&dto.id).await?;
-    Ok(Json(updated_quota))
+    Ok(Json(ApiResponse::success(updated_quota)))
 }
 
 /// 列出配额

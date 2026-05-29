@@ -1,0 +1,13 @@
+pub mod aistudio;
+pub mod antigravity;
+pub mod claude;
+pub mod codex;
+pub mod gemini;
+pub mod gemini_cli;
+pub mod iflow;
+pub mod kimi;
+pub mod oauth;
+pub mod openai;
+pub mod qwen;
+pub mod upstream_trace;
+pub mod vertex;

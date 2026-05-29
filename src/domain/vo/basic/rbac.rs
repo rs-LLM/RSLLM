@@ -1,8 +1,11 @@
+//! RBAC 响应视图对象模块。
+//! 定义权限、权限审计日志与角色信息的返回结构及表结构到视图对象的转换逻辑。
+
 // 用途：导入全局上下文实例
 // 说明：用于获取配置信息，如日期时间格式
 use crate::context::CONTEXT;
 // 用途：导入RBAC相关表结构
-// 说明：用于将表结构转换为VO（视图对象）
+// 说明：用于将表结构转换为视图对象
 use crate::domain::table::rbac::{RbacPermission, RbacPermissionAuditLog, RbacRole};
 // 用途：导入OpenAPI Schema支持
 // 说明：用于自动生成API文档
@@ -11,6 +14,8 @@ use utoipa::ToSchema;
 // 用途：权限视图对象结构体
 // 说明：用于返回给客户端的权限信息，包含格式化后的创建时间
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, ToSchema)]
+/// 权限视图对象。
+/// 用于向客户端返回权限基础信息与格式化后的创建时间字段。
 pub struct RbacPermissionVO {
     // 用途：权限ID
     // 说明：权限的唯一标识符
@@ -70,6 +75,8 @@ impl From<RbacPermission> for RbacPermissionVO {
 // 用途：权限审计日志视图对象结构体
 // 说明：用于返回给客户端的权限审计日志信息
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, ToSchema)]
+/// 权限审计日志视图对象。
+/// 用于表示权限变更操作的审计记录与格式化后的操作时间字段。
 pub struct RbacPermissionAuditLogVO {
     // 用途：审计日志ID
     // 说明：审计日志的唯一标识符
@@ -121,6 +128,8 @@ impl From<RbacPermissionAuditLog> for RbacPermissionAuditLogVO {
 // 用途：系统角色视图对象结构体
 // 说明：用于返回给客户端的角色信息，包含角色的权限列表
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, ToSchema)]
+/// 系统角色视图对象。
+/// 用于向客户端返回角色基础信息、角色权限列表与权限 ID 集合。
 pub struct SysRoleVO {
     // 用途：角色ID
     // 说明：角色的唯一标识符
@@ -139,7 +148,7 @@ pub struct SysRoleVO {
     pub permission_ids: Vec<String>,
 }
 
-// 用途：SysRoleVO实现
+// 用途：系统角色视图对象实现
 // 说明：提供设置权限的方法
 impl SysRoleVO {
     // 用途：设置角色权限

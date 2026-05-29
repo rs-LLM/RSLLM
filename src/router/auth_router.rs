@@ -13,12 +13,17 @@ use std::sync::Arc;
 // 用途：导入控制器
 // 说明：用于处理HTTP请求
 use crate::controller::ai_hub::{
-    api_key_controller, balance_controller, transaction_controller, usage_log_controller,
-    user_stats_controller,
+    api_key_controller, balance_controller, checkin_controller, redeem_code_controller,
+    subscription_controller, transaction_controller, usage_log_controller, user_stats_controller,
 };
 use crate::controller::{
-    rbac_permission_controller, rbac_role_controller, rbac_user_controller, sys_auth_controller,
-    sys_dict_controller, sys_menu_controller, sys_organization_controller, sys_service_controller,
+    rbac_permission_controller, rbac_role_controller, rbac_user_controller,
+    sys::{
+        invite_code_test_controller, profile_controller, register_management_controller,
+        sys_announcement_controller, twofa_controller,
+    },
+    sys_auth_controller, sys_dict_controller, sys_menu_controller, sys_organization_controller,
+    sys_service_controller,
 };
 
 // 用途：导入认证中间件
@@ -156,8 +161,84 @@ pub fn create_auth_router() -> Router<Arc<ServiceContext>> {
         // 用途：定义设置余额路由
         // 说明：管理员设置用户余额（需要manage_balance权限）
         .route("/balance/set", post(balance_controller::set_balance))
+        .route("/redeem-codes/list", post(redeem_code_controller::list))
+        .route(
+            "/redeem-codes/generate",
+            post(redeem_code_controller::generate),
+        )
+        .route(
+            "/redeem-codes/update-status",
+            post(redeem_code_controller::update_status),
+        )
+        .route(
+            "/admin/ratio/config",
+            get(sys_service_controller::get_admin_ratio_config),
+        )
+        .route(
+            "/admin/ratio/config",
+            post(sys_service_controller::update_admin_ratio_config),
+        )
+        .route(
+            "/admin/ratio/sync",
+            post(sys_service_controller::sync_admin_ratio_config),
+        )
         .layer(axum::middleware::from_fn(require_permission(
             "manage_balance",
+        )));
+
+    let subscription_management_routes = Router::new()
+        .route(
+            "/admin/subscription/plans",
+            get(subscription_controller::get_admin_subscription_plans),
+        )
+        .route(
+            "/admin/subscription/plans",
+            post(subscription_controller::update_admin_subscription_plans),
+        )
+        .layer(axum::middleware::from_fn(require_permission(
+            "manage_subscription",
+        )));
+
+    let register_management_routes = Router::new()
+        .route(
+            "/admin/invitation-codes/list",
+            post(register_management_controller::list_invitation_codes),
+        )
+        .route(
+            "/admin/invitation-codes/generate",
+            post(register_management_controller::generate_invitation_codes),
+        )
+        .route(
+            "/admin/invitation-codes/update",
+            post(register_management_controller::update_invitation_code),
+        )
+        .route(
+            "/admin/invitation-codes/consume-for-test",
+            post(invite_code_test_controller::consume_invite_code_for_test),
+        )
+        .route(
+            "/admin/registration-reviews/list",
+            post(register_management_controller::list_registration_reviews),
+        )
+        .route(
+            "/admin/registration-reviews/review",
+            post(register_management_controller::review_registration),
+        )
+        .layer(axum::middleware::from_fn(require_permission(
+            "manage_balance",
+        )));
+
+    let twofa_admin_routes = Router::new()
+        .route(
+            "/admin/user/2fa/disable",
+            post(twofa_controller::admin_reset_twofa),
+        )
+        .route(
+            "/admin/user/2fa/stats",
+            get(twofa_controller::admin_twofa_stats),
+        )
+        .layer(axum::middleware::from_fn(require_permission(
+            "manage_users",
         )));
 
     Router::new()
@@ -165,6 +246,16 @@ pub fn create_auth_router() -> Router<Arc<ServiceContext>> {
         // 说明：获取当前登录用户信息
         .route("/admin/sys_user_info", post(rbac_user_controller::info))
         .route("/admin/info", get(rbac_user_controller::info))
+        .route("/profile/get", get(profile_controller::get_profile))
+        .route("/profile/update", post(profile_controller::update_profile))
+        .route(
+            "/profile/upload-avatar",
+            post(profile_controller::upload_avatar),
+        )
+        .route(
+            "/admin/file/upload-image",
+            post(profile_controller::upload_image),
+        )
         // 用途：定义用户详情路由
         // 说明：获取指定用户的详细信息
         .route("/admin/sys_user_detail", post(rbac_user_controller::detail))
@@ -199,6 +290,34 @@ pub fn create_auth_router() -> Router<Arc<ServiceContext>> {
             "/admin/service",
             post(sys_service_controller::get_service_list),
         )
+        .route(
+            "/admin/system-config",
+            get(sys_service_controller::get_system_config),
+        )
+        .route(
+            "/admin/system-config",
+            post(sys_service_controller::update_system_config),
+        )
+        .route(
+            "/admin/system-config/test-smtp",
+            post(sys_service_controller::test_system_smtp),
+        )
+        .route(
+            "/admin/announcements",
+            get(sys_announcement_controller::list_announcements),
+        )
+        .route(
+            "/admin/announcements",
+            post(sys_announcement_controller::create_announcement),
+        )
+        .route(
+            "/admin/announcements/{id}",
+            put(sys_announcement_controller::update_announcement),
+        )
+        .route(
+            "/admin/announcements/{id}",
+            delete(sys_announcement_controller::delete_announcement),
+        )
         // 用途：定义获取权限码路由
         // 说明：获取当前用户的权限码列表，用于Vben前端权限控制
         .route("/admin/auth/codes", get(sys_auth_controller::get_codes))
@@ -208,9 +327,45 @@ pub fn create_auth_router() -> Router<Arc<ServiceContext>> {
         // 用途：定义余额查询路由
         // 说明：查询用户余额
         .route("/balance/get", post(balance_controller::get_balance))
+        .route("/user/checkin", get(checkin_controller::get_checkin_status))
+        .route("/user/checkin", post(checkin_controller::do_checkin))
+        .route("/user/2fa/status", get(twofa_controller::get_twofa_status))
+        .route("/user/2fa/setup", post(twofa_controller::setup_twofa))
+        .route("/user/2fa/enable", post(twofa_controller::enable_twofa))
+        .route("/user/2fa/disable", post(twofa_controller::disable_twofa))
+        .route(
+            "/user/2fa/backup_codes",
+            post(twofa_controller::regenerate_backup_codes),
+        )
+        .route(
+            "/user/subscription/plans",
+            get(subscription_controller::list_subscription_plans),
+        )
+        .route(
+            "/user/subscription/self",
+            get(subscription_controller::get_self_subscription),
+        )
+        .route(
+            "/user/subscription/purchase",
+            post(subscription_controller::purchase_subscription),
+        )
+        .route(
+            "/user/subscription/payment/orders",
+            get(subscription_controller::list_self_subscription_payment_orders),
+        )
+        .route(
+            "/user/subscription/payment/create",
+            post(subscription_controller::create_subscription_payment_order),
+        )
+        .route(
+            "/user/subscription/payment/providers",
+            get(subscription_controller::list_subscription_payment_providers),
+        )
         // 用途：定义交易记录查询路由
         // 说明：查询交易记录列表
         .route("/transaction/list", post(transaction_controller::list))
+        .route("/transaction/summary", get(transaction_controller::summary))
+        .route("/redeem-codes/redeem", post(redeem_code_controller::redeem))
         // 用途：定义创建API密钥路由
         // 说明：为当前用户创建新的API密钥
         .route("/users/api-keys", post(api_key_controller::create_api_key))
@@ -271,7 +426,10 @@ pub fn create_auth_router() -> Router<Arc<ServiceContext>> {
             "/user/stats/refresh",
             post(user_stats_controller::refresh_user_stats),
         )
+        .merge(twofa_admin_routes)
         .merge(balance_management_routes)
+        .merge(subscription_management_routes)
+        .merge(register_management_routes)
         .merge(user_management_routes)
         // 用途：添加认证中间件
         // 说明：保护需认证的路由，确保只有已登录用户可以访问

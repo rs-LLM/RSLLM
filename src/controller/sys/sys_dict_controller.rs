@@ -10,7 +10,7 @@ use crate::domain::dto::{DictAddDTO, DictEditDTO, DictPageDTO, IdDTO};
 // 说明：用于将DTO转换为数据库实体
 use crate::domain::table::sys_dict::SysDict;
 
-// 用途：导入响应VO
+// 用途：导入响应视图对象
 // 说明：用于统一HTTP响应格式
 use crate::domain::vo::response::ApiResponse;
 
@@ -59,7 +59,7 @@ pub async fn page(page: Json<DictPageDTO>) -> impl IntoResponse {
         total: p.total,
         records: p.records,
     });
-    // 用途：将结果转换为响应VO
+    // 用途：将结果转换为响应视图对象
     // 说明：统一响应格式，包含状态码、消息和数据
     match wrapper_data {
         Ok(result) => Json(ApiResponse::success(result)),
@@ -106,7 +106,7 @@ pub async fn add(mut arg: Json<DictAddDTO>) -> impl IntoResponse {
     // 用途：更新字典缓存
     // 说明：字典数据发生变化时，需要更新缓存，确保后续查询使用最新数据
     let _ = CONTEXT.sys_dict_service.update_cache().await;
-    // 用途：将结果转换为响应VO
+    // 用途：将结果转换为响应视图对象
     // 说明：统一响应格式，包含状态码、消息和数据
     match data {
         Ok(result) => Json(ApiResponse::success(result)),
@@ -134,7 +134,7 @@ pub async fn update(arg: Json<DictEditDTO>) -> impl IntoResponse {
     // 用途：更新字典缓存
     // 说明：字典数据发生变化时，需要更新缓存，确保后续查询使用最新数据
     let _ = CONTEXT.sys_dict_service.update_cache().await;
-    // 用途：将结果转换为响应VO
+    // 用途：将结果转换为响应视图对象
     // 说明：统一响应格式，包含状态码、消息和数据
     match data {
         Ok(result) => Json(ApiResponse::success(result)),
@@ -165,7 +165,7 @@ pub async fn remove(arg: Json<IdDTO>) -> impl IntoResponse {
     // 用途：更新字典缓存
     // 说明：字典数据发生变化时，需要更新缓存，确保后续查询使用最新数据
     let _ = CONTEXT.sys_dict_service.update_cache().await;
-    // 用途：将结果转换为响应VO
+    // 用途：将结果转换为响应视图对象
     // 说明：统一响应格式，包含状态码、消息和数据
     match data {
         Ok(result) => Json(ApiResponse::success(result)),

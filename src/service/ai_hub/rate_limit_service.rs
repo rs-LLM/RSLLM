@@ -4,12 +4,22 @@ use crate::domain::table::ai_hub::user_level_config::UserLevelConfig;
 use crate::domain::table::basic::SysUser;
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::pool;
+use crate::service::ai_hub::UserLevelService;
 use rbatis::rbdc::DateTime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use utoipa::ToSchema;
+
+const USER_LEVEL_CACHE_TTL: Duration = Duration::from_secs(30);
+
+#[derive(Clone)]
+struct CachedUserLevelConfig {
+    config: UserLevelConfig,
+    expires_at: Instant,
+}
 
 /// 速率限制检查结果
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -141,6 +151,7 @@ impl TokenBucket {
 pub struct RateLimitService {
     rpm_buckets: Arc<RwLock<HashMap<String, TokenBucket>>>,
     tpm_buckets: Arc<RwLock<HashMap<String, TokenBucket>>>,
+    user_level_cache: Arc<RwLock<HashMap<String, CachedUserLevelConfig>>>,
 }
 
 impl Default for RateLimitService {
@@ -154,11 +165,28 @@ impl RateLimitService {
         RateLimitService {
             rpm_buckets: Arc::new(RwLock::new(HashMap::new())),
             tpm_buckets: Arc::new(RwLock::new(HashMap::new())),
+            user_level_cache: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    pub async fn clear_user_level_cache(&self) {
+        self.user_level_cache.write().await.clear();
+    }
+
+    pub async fn invalidate_user_level_cache(&self, user_id: &str) {
+        self.user_level_cache.write().await.remove(user_id);
     }
 
     /// 获取用户等级配置
     pub async fn get_user_level_config(&self, user_id: &str) -> ApplicationResult<UserLevelConfig> {
+        if let Some(cached) = self.user_level_cache.read().await.get(user_id).cloned()
+            && cached.expires_at > Instant::now()
+        {
+            return Ok(cached.config);
+        }
+
+        UserLevelService::new().init_default_levels().await?;
+
         let users = SysUser::select_by_map(pool!(), rbs::value! { "id": user_id }).await?;
 
         if users.is_empty() {
@@ -184,7 +212,15 @@ impl RateLimitService {
             });
         }
 
-        Ok(configs[0].clone())
+        let config = configs[0].clone();
+        self.user_level_cache.write().await.insert(
+            user_id.to_string(),
+            CachedUserLevelConfig {
+                config: config.clone(),
+                expires_at: Instant::now() + USER_LEVEL_CACHE_TTL,
+            },
+        );
+        Ok(config)
     }
 
     /// 检查用户配额
@@ -282,6 +318,14 @@ impl RateLimitService {
             tpm_remaining,
             warning,
         })
+    }
+
+    pub async fn precheck_request_tokens(
+        &self,
+        user_id: &str,
+        input_tokens: i32,
+    ) -> ApplicationResult<RateLimitCheckResult> {
+        self.check_quota_with_tokens(user_id, input_tokens).await
     }
 
     /// 检查用户配额（使用自定义限速标准）
@@ -448,5 +492,13 @@ impl RateLimitService {
         );
 
         Ok(())
+    }
+
+    pub async fn settle_output_tokens(
+        &self,
+        user_id: &str,
+        output_tokens: i32,
+    ) -> ApplicationResult<()> {
+        self.consume_tokens(user_id, output_tokens).await
     }
 }

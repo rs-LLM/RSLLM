@@ -172,7 +172,7 @@
     },
     {
       name: "模型管理",
-      permission: "sys:model:view",
+      permission: "ai:model:view",
       path: "/ai/model",
       permission_type: "menu",
       description: "查看模型管理页面",
@@ -182,7 +182,7 @@
     },
     {
       name: "模型编辑",
-      permission: "sys:model:edit",
+      permission: "ai:model:edit",
       path: "/admin/model_update",
       permission_type: "button",
       description: "编辑模型配置",
@@ -192,7 +192,7 @@
     },
     {
       name: "提供商编辑",
-      permission: "sys:provider:edit",
+      permission: "ai:provider:edit",
       path: "/admin/provider_update",
       permission_type: "button",
       description: "编辑提供商配置",

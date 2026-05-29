@@ -23,6 +23,8 @@ pub struct UserRegisterDTO {
     // 说明：用于验证用户身份，必填字段
     #[schema(example = "SecurePass123!")]
     pub password: String,
+    #[schema(example = "L1")]
+    pub user_level: Option<String>,
     // 用途：同意服务条款
     // 说明：用户必须同意服务条款和隐私政策才能注册
     #[schema(example = true)]

@@ -1,4 +1,5 @@
-// 用途：导出AI Hub存储相关模块
+//! AI Hub 数据表模块。
+//! 负责导出 AI Hub 领域相关表结构与初始化能力。
 
 // 用途：导出表初始化相关功能
 // 说明：包含数据库表同步和默认数据初始化逻辑
@@ -33,14 +34,16 @@ pub use provider_config::*;
 pub mod transaction;
 pub use transaction::*;
 
+pub mod redeem_code;
+pub mod redeem_code_usage;
+pub use redeem_code::*;
+pub use redeem_code_usage::*;
+
 pub mod user_level_config;
 pub use user_level_config::*;
 
-pub mod quota_usage_history;
-pub use quota_usage_history::*;
-
-pub mod rate_limit_event;
-pub use rate_limit_event::*;
-
 pub mod user_level_model_rate_limit;
 pub use user_level_model_rate_limit::*;
+
+pub mod system_status_hourly;
+pub use system_status_hourly::*;

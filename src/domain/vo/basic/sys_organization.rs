@@ -1,14 +1,19 @@
+//! 系统组织响应视图对象模块。
+//! 定义组织信息与组织树节点的返回结构及表结构到视图对象的转换逻辑。
+
 // 用途：导入全局上下文实例
 // 说明：用于获取配置信息，如日期时间格式
 use crate::context::CONTEXT;
 
 // 用途：导入组织表结构
-// 说明：用于将表结构转换为VO（视图对象）
+// 说明：用于将表结构转换为视图对象
 use crate::domain::table::basic::sys_organization::SysOrganization;
 
 // 用途：组织视图对象结构体
 // 说明：用于返回给客户端的组织信息，包含格式化后的创建时间
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+/// 系统组织视图对象。
+/// 用于向客户端返回组织基础信息与格式化后的创建时间字段。
 pub struct SysOrganizationVO {
     // 用途：组织ID
     // 说明：组织的唯一标识符
@@ -39,11 +44,11 @@ pub struct SysOrganizationVO {
     pub create_date: Option<String>,
 }
 
-// 用途：实现SysOrganization到SysOrganizationVO的转换
+// 用途：实现SysOrganization到系统组织视图对象的转换
 // 说明：将数据库表结构转换为视图对象，方便返回给客户端
 impl From<SysOrganization> for SysOrganizationVO {
     // 用途：转换方法
-    // 说明：将SysOrganization转换为SysOrganizationVO，格式化创建时间
+    // 说明：将SysOrganization转换为系统组织视图对象，格式化创建时间
     fn from(arg: SysOrganization) -> Self {
         Self {
             id: arg.id,
@@ -61,9 +66,11 @@ impl From<SysOrganization> for SysOrganizationVO {
     }
 }
 
-// 用途：组织树节点VO结构体
+// 用途：组织树节点视图对象结构体
 // 说明：用于返回组织树结构
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+/// 组织树节点视图对象。
+/// 用于表示组织树的递归节点结构，包含当前节点与子节点列表。
 pub struct OrganizationTreeNodeVO {
     // 用途：组织ID
     // 说明：组织的唯一标识符

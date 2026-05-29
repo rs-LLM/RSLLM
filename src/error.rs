@@ -143,6 +143,9 @@ pub enum Error {
     /// 用途：未找到错误
     /// 说明：用于资源不存在的错误
     NotFound(String),
+    /// 用途：规则数量超限
+    /// 说明：用于规则数量超过限制的错误
+    TooManyRules(usize),
 }
 
 /// 用途：实现Display trait
@@ -167,6 +170,9 @@ impl Display for Error {
             Error::RateLimitExceeded => write!(f, "Rate Limit Exceeded"),
             Error::DatabaseError(error) => write!(f, "Database Error: {}", error),
             Error::NotFound(error) => write!(f, "Not Found: {}", error),
+            Error::TooManyRules(limit) => {
+                write!(f, "规则数量超限，最大允许: {}", limit)
+            }
         }
     }
 }
@@ -184,8 +190,7 @@ impl axum::response::IntoResponse for Error {
         use axum::Json;
         use axum::http::StatusCode;
 
-        let error_message = self.to_string();
-        let (status_code, error_code) = match self {
+        let (status_code, error_code) = match &self {
             Error::AuthError(msg) => {
                 let code = if msg.contains("token") || msg.contains("Token") {
                     if msg.contains("expired") || msg.contains("过期") {
@@ -227,6 +232,7 @@ impl axum::response::IntoResponse for Error {
                 (StatusCode::NOT_FOUND, code)
             }
             Error::RateLimitExceeded => (StatusCode::TOO_MANY_REQUESTS, RATE_LIMIT_EXCEEDED),
+            Error::TooManyRules(_) => (StatusCode::BAD_REQUEST, BUSINESS_INVALID_OPERATION),
             Error::BusinessError(msg) => {
                 let code = if msg.contains("quota") || msg.contains("配额") {
                     BUSINESS_QUOTA_EXCEEDED
@@ -271,7 +277,34 @@ impl axum::response::IntoResponse for Error {
             Error::E(_) => (StatusCode::INTERNAL_SERVER_ERROR, SERVER_INTERNAL_ERROR),
         };
 
-        let response = ApiResponse::<()>::error(error_code, &error_message);
+        let public_message: &str = match &self {
+            Error::AuthError(_) => "未授权，请重新登录",
+            Error::NotFound(msg) => msg,
+            Error::ValidationError(msg) => msg,
+            Error::BusinessError(msg) => msg,
+            Error::TooManyRules(_) => "请求参数不合法",
+            Error::RateLimitExceeded => "请求过于频繁，请稍后再试",
+            Error::DatabaseError(_) => "数据库错误，请稍后重试",
+            Error::ExternalServiceError(_) => "外部服务异常，请稍后重试",
+            Error::ConfigError(_) | Error::EncryptionError(_) => "服务内部错误",
+            Error::Application(_) | Error::E(_) => "服务器内部错误",
+        };
+
+        match &self {
+            Error::DatabaseError(e)
+            | Error::ExternalServiceError(e)
+            | Error::ConfigError(e)
+            | Error::EncryptionError(e)
+            | Error::E(e) => {
+                log::error!("[error] {}", e);
+            }
+            Error::Application(e) => {
+                log::error!("[error] {}", e);
+            }
+            _ => {}
+        }
+
+        let response = ApiResponse::<()>::error(error_code, public_message);
 
         (status_code, Json(response)).into_response()
     }
@@ -745,8 +778,10 @@ impl axum::response::IntoResponse for ApplicationError {
         use axum::http::StatusCode;
 
         // 根据错误类型确定HTTP状态码和错误码
-        let (status_code, error_code) = match self {
-            ApplicationError::BusinessError { .. } => (StatusCode::BAD_REQUEST, "400"),
+        let (status_code, error_code) = match &self {
+            ApplicationError::BusinessError { code, .. } => {
+                (StatusCode::BAD_REQUEST, code.as_deref().unwrap_or("400"))
+            }
             ApplicationError::AuthError { .. } => (StatusCode::UNAUTHORIZED, "401"),
             ApplicationError::NotFound { .. } => (StatusCode::NOT_FOUND, "404"),
             ApplicationError::ValidationError { .. } => (StatusCode::BAD_REQUEST, "422"),
@@ -764,7 +799,40 @@ impl axum::response::IntoResponse for ApplicationError {
             ApplicationError::GenericError { .. } => (StatusCode::INTERNAL_SERVER_ERROR, "500"),
         };
 
-        let response = ApiResponse::<()>::error(error_code, &self.to_string());
+        match &self {
+            ApplicationError::DatabaseError { message, .. }
+            | ApplicationError::ExternalServiceError { message, .. }
+            | ApplicationError::ConfigError { message, .. }
+            | ApplicationError::EncryptionError { message, .. }
+            | ApplicationError::StorageError { message, .. }
+            | ApplicationError::GenericError { message }
+            | ApplicationError::TokenError { message, .. } => {
+                log::error!("[app-error] {}", message);
+            }
+            _ => {}
+        }
+
+        let public_message: &str = match &self {
+            ApplicationError::AuthError { .. } => "未授权，请重新登录",
+            ApplicationError::NotFound { message, .. }
+            | ApplicationError::ValidationError { message, .. }
+            | ApplicationError::BusinessError { message, .. }
+            | ApplicationError::RateLimitExceeded { message, .. }
+            | ApplicationError::QuotaExceeded { message, .. }
+            | ApplicationError::BalanceExceeded { message, .. }
+            | ApplicationError::BillingError { message, .. }
+            | ApplicationError::PriceRuleError { message, .. } => message,
+            ApplicationError::DatabaseError { .. } => "数据库错误，请稍后重试",
+            ApplicationError::ExternalServiceError { .. } => "外部服务异常，请稍后重试",
+            ApplicationError::ConfigError { .. } | ApplicationError::EncryptionError { .. } => {
+                "服务内部错误"
+            }
+            ApplicationError::StorageError { .. } => "存储服务异常，请稍后重试",
+            ApplicationError::TokenError { .. } => "令牌无效，请重新登录",
+            ApplicationError::GenericError { .. } => "服务器内部错误",
+        };
+
+        let response = ApiResponse::<()>::error(error_code, public_message);
 
         (status_code, Json(response)).into_response()
     }
@@ -801,8 +869,9 @@ impl From<ApplicationError> for Error {
 /// 用途：实现From trait for Error到ApplicationError的转换
 /// 说明：允许Error类型转换为ApplicationError，便于统一处理
 impl From<Error> for ApplicationError {
-    fn from(err: Error) -> Self {
-        match err {
+    fn from(error: Error) -> Self {
+        use crate::error::error_codes::*;
+        match error {
             Error::ConfigError(msg) => ApplicationError::ConfigError {
                 message: msg,
                 key: None,
@@ -847,6 +916,11 @@ impl From<Error> for ApplicationError {
                 id: None,
             },
             Error::Application(app_err) => app_err,
+            Error::TooManyRules(limit) => ApplicationError::BusinessError {
+                message: format!("规则数量超限，最大允许: {}", limit),
+                code: Some(BUSINESS_INVALID_OPERATION.to_string()),
+                context: None,
+            },
             Error::E(msg) => ApplicationError::GenericError { message: msg },
         }
     }

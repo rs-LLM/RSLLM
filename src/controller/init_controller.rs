@@ -9,15 +9,23 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::context::ServiceContext;
 use crate::domain::table::LoginCheck;
+use crate::domain::table::invitation_code::InvitationCode;
 use crate::domain::table::key_value_config::KeyValueConfig;
 use crate::domain::table::rbac::RbacUserRole;
+use crate::domain::table::registration_review::RegistrationReview;
 use crate::domain::table::sys_user::SysUser;
 use crate::domain::vo::response::ApiResponse;
 use crate::service::InitTransactionManager;
+use crate::service::sys::{RegisterPolicy, RegisterPolicyService};
 use crate::util::password_encoder::PasswordEncoder;
+use crate::util::user_register_validation::UserRegisterValidator;
+use lettre::message::Mailbox;
+use lettre::transport::smtp::authentication::Credentials;
+use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
 /// 用途：初始化状态枚举
 /// 说明：表示系统初始化的不同状态
@@ -396,7 +404,10 @@ pub async fn verify_db_connection(
     let start_time = Instant::now();
 
     let rb = RBatis::new();
-    match rb.link(include!("../../target/driver.rs"), &db_url).await {
+    match rb
+        .link(include!(concat!(env!("OUT_DIR"), "/driver.rs")), &db_url)
+        .await
+    {
         Ok(_) => {
             let connection_time = start_time.elapsed().as_millis() as u64;
             info!(
@@ -602,23 +613,55 @@ pub async fn create_super_admin(
     State(context): State<Arc<ServiceContext>>,
     Json(req): Json<CreateAdminRequest>,
 ) -> Result<Json<ApiResponse<CreateAdminResponse>>, StatusCode> {
-    let conn = context.rb.acquire().await.map_err(|e| {
-        log::error!("获取数据库连接失败: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    {
+        let conn = context.rb.acquire().await.map_err(|e| {
+            log::error!("获取数据库连接失败: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    if check_system_initialized(&conn).await? {
-        warn!("[INIT] 超级管理员创建请求被拒绝，系统已完成初始化");
-        return Ok(Json(ApiResponse::error(
-            "INIT_ALREADY_DONE",
-            "系统已完成初始化，该功能仅能使用一次",
-        )));
+        if check_system_initialized(&conn).await? {
+            warn!("[INIT] 超级管理员创建请求被拒绝，系统已完成初始化");
+            return Ok(Json(ApiResponse::error(
+                "INIT_ALREADY_DONE",
+                "系统已完成初始化，该功能仅能使用一次",
+            )));
+        }
+
+        info!(
+            "[INIT] 收到超级管理员创建请求: username={}, name={}",
+            req.username, req.name
+        );
+
+        // sqlite 模式下连接池会被限制为 1（见 context.rs），如果在同一个请求里嵌套 acquire，
+        // 会导致死等从而表现为前端“响应超时”。这里把前置校验/清理逻辑放在独立作用域，
+        // 让 conn 在后续步骤开始前被 drop。
+
+        match SysUser::select_by_map(&conn, rbs::value! { "account": &req.username }).await {
+            Ok(users) if !users.is_empty() => {
+                warn!("[INIT] 用户名已存在，准备覆盖: {}", req.username);
+                match SysUser::delete_by_map(&conn, rbs::value! { "account": &req.username }).await
+                {
+                    Ok(_) => {
+                        info!("[INIT] 已删除旧管理员账户: {}", req.username);
+                    }
+                    Err(e) => {
+                        warn!("[INIT] 删除旧管理员账户失败: {}", e);
+                        return Ok(Json(ApiResponse::error(
+                            "DELETE_USER_FAILED",
+                            "删除旧管理员账户失败",
+                        )));
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!("[INIT] 检查用户名失败: {}", e);
+                return Ok(Json(ApiResponse::error("DB_ERROR", "检查用户名失败")));
+            }
+        }
     }
 
-    info!(
-        "[INIT] 收到超级管理员创建请求: username={}, name={}",
-        req.username, req.name
-    );
+    // 注意：上面作用域结束后，conn 已释放，后续步骤可以安全 acquire 新连接。
 
     if !req
         .username
@@ -671,29 +714,6 @@ pub async fn create_super_admin(
 
     info!("[INIT] 开始创建超级管理员事务: {}", transaction_id);
 
-    match SysUser::select_by_map(&conn, rbs::value! { "account": &req.username }).await {
-        Ok(users) if !users.is_empty() => {
-            warn!("[INIT] 用户名已存在，准备覆盖: {}", req.username);
-            match SysUser::delete_by_map(&conn, rbs::value! { "account": &req.username }).await {
-                Ok(_) => {
-                    info!("[INIT] 已删除旧管理员账户: {}", req.username);
-                }
-                Err(e) => {
-                    warn!("[INIT] 删除旧管理员账户失败: {}", e);
-                    return Ok(Json(ApiResponse::error(
-                        "DELETE_USER_FAILED",
-                        "删除旧管理员账户失败",
-                    )));
-                }
-            }
-        }
-        Ok(_) => {}
-        Err(e) => {
-            warn!("[INIT] 检查用户名失败: {}", e);
-            return Ok(Json(ApiResponse::error("DB_ERROR", "检查用户名失败")));
-        }
-    }
-
     let user_id = ulid::Ulid::new().to_string();
     let created_at = DateTime::now().to_string();
 
@@ -703,6 +723,7 @@ pub async fn create_super_admin(
         password: Some(PasswordEncoder::encode(password)),
         name: Some(req.name.clone()),
         email: None,
+        avatar: Some("/user.png".to_string()),
         login_check: Some(LoginCheck::PasswordCheck),
         state: Some(1),
         create_date: Some(DateTime::now()),
@@ -734,7 +755,7 @@ pub async fn create_super_admin(
         let _ = transaction_manager.rollback_transaction().await;
         return Ok(Json(ApiResponse::error(
             "CREATE_USER_FAILED",
-            &format!("创建用户失败: {}", e),
+            "创建用户失败",
         )));
     }
 
@@ -804,7 +825,7 @@ pub async fn create_super_admin(
         let _ = transaction_manager.rollback_transaction().await;
         return Ok(Json(ApiResponse::error(
             "CREATE_USER_ROLE_FAILED",
-            &format!("创建用户角色关联失败: {}", e),
+            "创建用户角色关联失败",
         )));
     }
 
@@ -826,10 +847,7 @@ pub async fn create_super_admin(
 
     if let Err(e) = transaction_manager.commit_transaction().await {
         error!("[INIT] 提交事务失败: {}", e);
-        return Ok(Json(ApiResponse::error(
-            "COMMIT_FAILED",
-            &format!("提交事务失败: {}", e),
-        )));
+        return Ok(Json(ApiResponse::error("COMMIT_FAILED", "提交事务失败")));
     }
 
     info!(
@@ -1116,17 +1134,22 @@ pub async fn save_init_config(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     info!("[INIT] 收到保存初始化配置请求");
 
-    let conn = context.rb.acquire().await.map_err(|e| {
-        log::error!("获取数据库连接失败: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    {
+        let conn = context.rb.acquire().await.map_err(|e| {
+            log::error!("获取数据库连接失败: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    if check_system_initialized(&conn).await? {
-        warn!("[INIT] 保存初始化配置请求被拒绝，系统已完成初始化");
-        return Ok(Json(ApiResponse::error(
-            "INIT_ALREADY_DONE",
-            "系统已完成初始化，该功能仅能使用一次",
-        )));
+        if check_system_initialized(&conn).await? {
+            warn!("[INIT] 保存初始化配置请求被拒绝，系统已完成初始化");
+            return Ok(Json(ApiResponse::error(
+                "INIT_ALREADY_DONE",
+                "系统已完成初始化，该功能仅能使用一次",
+            )));
+        }
+
+        // sqlite 模式下连接池会被限制为 1（见 context.rs），后续步骤中会再次 acquire 连接。
+        // 这里提前结束 conn 的生命周期，避免后续 acquire 死等导致前端超时。
     }
 
     let mut transaction_manager = InitTransactionManager::new(context.rb.clone());
@@ -1209,7 +1232,7 @@ pub async fn save_init_config(
         let _ = transaction_manager.rollback_transaction().await;
         return Ok(Json(ApiResponse::error(
             "SAVE_CONFIG_FAILED",
-            &format!("保存配置失败: {}", e),
+            "保存配置失败",
         )));
     }
 
@@ -1271,10 +1294,7 @@ pub async fn save_init_config(
 
     if let Err(e) = transaction_manager.commit_transaction().await {
         error!("[INIT] 提交事务失败: {}", e);
-        return Ok(Json(ApiResponse::error(
-            "COMMIT_FAILED",
-            &format!("提交事务失败: {}", e),
-        )));
+        return Ok(Json(ApiResponse::error("COMMIT_FAILED", "提交事务失败")));
     }
 
     info!("[INIT] 系统初始化配置保存成功，事务ID: {}", transaction_id);
@@ -1295,8 +1315,67 @@ pub struct RegisterRequest {
     pub email: String,
     /// 用户密码
     pub password: String,
+    pub email_code: Option<String>,
+    pub captcha_code: Option<String>,
+    pub captcha_account: Option<String>,
+    pub invite_code: Option<String>,
+    pub apply_reason: Option<String>,
     /// 是否同意服务条款
     pub agree_terms: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct SendRegisterEmailCodeRequest {
+    pub email: String,
+    pub captcha_code: Option<String>,
+    pub captcha_account: Option<String>,
+}
+
+async fn verify_register_captcha(
+    context: &Arc<ServiceContext>,
+    policy: &RegisterPolicy,
+    email: &str,
+    captcha_code: Option<&str>,
+    captcha_account: Option<&str>,
+) -> Result<(), Json<ApiResponse<serde_json::Value>>> {
+    if !policy.register_captcha_enabled {
+        return Ok(());
+    }
+
+    let account = captcha_account
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| email.to_string());
+    let code = captcha_code.unwrap_or("").trim().to_lowercase();
+    if code.is_empty() {
+        return Err(Json(ApiResponse::error(
+            "CAPTCHA_REQUIRED",
+            "请先输入图形验证码",
+        )));
+    }
+
+    let cache_key = format!("captch:account_{}", account);
+    let cached = match context.cache_service.get_string(&cache_key).await {
+        Ok(value) => value.trim().to_lowercase(),
+        Err(_) => {
+            return Err(Json(ApiResponse::error(
+                "CAPTCHA_EXPIRED",
+                "图形验证码不存在或已过期",
+            )));
+        }
+    };
+
+    if cached != code {
+        return Err(Json(ApiResponse::error(
+            "CAPTCHA_INVALID",
+            "图形验证码不正确",
+        )));
+    }
+
+    // 校验成功后立即删除，避免被重放
+    let _ = context.cache_service.del(&cache_key).await;
+
+    Ok(())
 }
 
 /// 用途：用户注册控制器方法
@@ -1317,10 +1396,153 @@ pub async fn register(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     info!("[AUTH] 收到用户注册请求: email={}", req.email);
 
+    let policy = RegisterPolicyService::get_policy(&context.rb).await;
+    if !policy.allow_register {
+        return Ok(Json(ApiResponse::error(
+            "REGISTER_DISABLED",
+            "当前站点已关闭用户注册",
+        )));
+    }
+
+    let email = req.email.trim().to_lowercase();
+    // 图形验证码：verify_register_captcha 已在校验成功后删除缓存 key，确保一次性使用
+    if let Err(resp) = verify_register_captcha(
+        &context,
+        &policy,
+        &email,
+        req.captcha_code.as_deref(),
+        req.captcha_account.as_deref(),
+    )
+    .await
+    {
+        return Ok(resp);
+    }
+
+    if policy.register_email_verify_enabled {
+        let input_email_code = req.email_code.as_deref().unwrap_or("").trim();
+        if input_email_code.is_empty() {
+            return Ok(Json(ApiResponse::error(
+                "EMAIL_CODE_REQUIRED",
+                "请先输入邮箱验证码",
+            )));
+        }
+        let code_key = format!("auth:register:email_code:{}", email);
+        let cached_code = match context.cache_service.get_string(&code_key).await {
+            Ok(code) => code,
+            Err(_) => {
+                return Ok(Json(ApiResponse::error(
+                    "EMAIL_CODE_EXPIRED",
+                    "邮箱验证码不存在或已过期",
+                )));
+            }
+        };
+        if input_email_code != cached_code.trim() {
+            return Ok(Json(ApiResponse::error(
+                "EMAIL_CODE_INVALID",
+                "邮箱验证码不正确",
+            )));
+        }
+
+        // 校验成功后立即删除，避免 10 分钟内被重放
+        let _ = context.cache_service.del(&code_key).await;
+    }
+
+    let invite_code = req
+        .invite_code
+        .as_ref()
+        .map(|v| v.trim().to_uppercase())
+        .filter(|v| !v.is_empty());
+
+    if policy.invite_code_required && invite_code.is_none() {
+        return Ok(Json(ApiResponse::error(
+            "INVITE_CODE_REQUIRED",
+            "当前注册需要邀请码",
+        )));
+    }
+
+    let mut valid_invite_code: Option<InvitationCode> = None;
+    if let Some(code) = &invite_code {
+        match RegisterPolicyService::find_invite_code(&context.rb, code).await {
+            Ok(invite) => valid_invite_code = Some(invite),
+            Err(_) => {
+                return Ok(Json(ApiResponse::error(
+                    "INVITE_CODE_INVALID",
+                    "邀请码无效",
+                )));
+            }
+        }
+    }
+
+    let should_review = policy.register_review_enabled
+        && !(policy.invite_code_bypass_review && valid_invite_code.is_some());
+
+    let invite_user_level = valid_invite_code
+        .as_ref()
+        .and_then(|invite| invite.user_level.clone());
+
+    if should_review {
+        let apply_reason = req
+            .apply_reason
+            .as_ref()
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default();
+        if apply_reason.is_empty() {
+            return Ok(Json(ApiResponse::error(
+                "APPLY_REASON_REQUIRED",
+                "已开启注册审核，请填写入站申请说明",
+            )));
+        }
+
+        let review_res = RegisterPolicyService::create_review(
+            &context.rb,
+            req.name.clone(),
+            email.clone(),
+            req.password.clone(),
+            req.agree_terms,
+            invite_code.clone(),
+            invite_user_level.clone(),
+            Some(apply_reason),
+        )
+        .await;
+
+        match review_res {
+            Ok(RegistrationReview { .. }) => {
+                let _ = RegisterPolicyService::send_mail(
+                    &context.rb,
+                    &email,
+                    "RSLLM 注册申请已提交",
+                    "您的注册申请已提交，当前状态：待审核。审核通过后可直接登录。",
+                )
+                .await;
+                return Ok(Json(ApiResponse::success(serde_json::json!({
+                    "status": "pending_review",
+                    "message": "注册申请已提交，等待审核"
+                }))));
+            }
+            Err(e) => {
+                return Ok(Json(ApiResponse::error(
+                    "REGISTER_REVIEW_CREATE_FAILED",
+                    &format!("注册申请创建失败: {}", e),
+                )));
+            }
+        }
+    }
+
+    if let Some(code) = &invite_code {
+        if let Err(e) = RegisterPolicyService::consume_invite_code(&context.rb, code, None).await {
+            log::warn!("[AUTH] 邀请码消费失败: {}", e);
+            return Ok(Json(ApiResponse::error(
+                "INVITE_CODE_EXHAUSTED",
+                "邀请码已用尽或不可用",
+            )));
+        }
+    }
+
     let register_dto = crate::domain::dto::basic::register::UserRegisterDTO {
         name: req.name,
-        email: req.email,
+        email,
         password: req.password,
+        user_level: invite_user_level,
         agree_terms: req.agree_terms,
     };
 
@@ -1352,4 +1574,213 @@ pub async fn register(
             )))
         }
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/auth/register/send-email-code",
+    request_body = SendRegisterEmailCodeRequest,
+    responses(
+        (status = 200, description = "发送成功", body = ApiResponse<serde_json::Value>),
+        (status = 400, description = "发送失败", body = ApiResponse<serde_json::Value>)
+    ),
+    tag = "auth"
+)]
+pub async fn send_register_email_code(
+    State(context): State<Arc<ServiceContext>>,
+    Json(req): Json<SendRegisterEmailCodeRequest>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    let email = req.email.trim().to_lowercase();
+    let policy = RegisterPolicyService::get_policy(&context.rb).await;
+    if !policy.allow_register {
+        return Ok(Json(ApiResponse::error(
+            "REGISTER_DISABLED",
+            "当前站点已关闭用户注册",
+        )));
+    }
+    if let Err(msg) = UserRegisterValidator::validate_email(&email) {
+        return Ok(Json(ApiResponse::error("INVALID_EMAIL", &msg)));
+    }
+
+    // 邮箱验证码发送限流：仅按邮箱（最小实现）
+    // 60 秒内最多 1 次
+    // 1 小时内最多 5 次
+    let rl_60s_key = format!("auth:register:email_code:rl:60s:{}", email);
+    let rl_1h_key = format!("auth:register:email_code:rl:1h:{}", email);
+
+    let ttl_60s = context.cache_service.ttl(&rl_60s_key).await.unwrap_or(-2);
+    if ttl_60s > 0 {
+        return Ok(Json(ApiResponse::error(
+            "EMAIL_CODE_RATE_LIMITED",
+            "验证码发送过于频繁，请稍后再试",
+        )));
+    }
+
+    let count_1h: i32 = context
+        .cache_service
+        .get_string(&rl_1h_key)
+        .await
+        .ok()
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .unwrap_or(0);
+    if count_1h >= 5 {
+        return Ok(Json(ApiResponse::error(
+            "EMAIL_CODE_RATE_LIMITED",
+            "验证码发送次数已达上限，请稍后再试",
+        )));
+    }
+
+    // 写入限流标记
+    let _ = context
+        .cache_service
+        .set_string_ex(&rl_60s_key, "1", Some(Duration::from_secs(60)))
+        .await;
+    let _ = context
+        .cache_service
+        .set_string_ex(
+            &rl_1h_key,
+            &(count_1h + 1).to_string(),
+            Some(Duration::from_secs(3600)),
+        )
+        .await;
+
+    let mut conn = match context.rb.acquire().await {
+        Ok(c) => c,
+        Err(e) => {
+            return Ok(Json(ApiResponse::error(
+                "DB_ERROR",
+                &format!("数据库连接失败: {}", e),
+            )));
+        }
+    };
+
+    if !policy.register_email_verify_enabled {
+        return Ok(Json(ApiResponse::error(
+            "REGISTER_EMAIL_VERIFY_DISABLED",
+            "当前系统已关闭注册邮箱验证码",
+        )));
+    }
+
+    // 图形验证码：verify_register_captcha 已在校验成功后删除缓存 key，确保一次性使用
+    if let Err(resp) = verify_register_captcha(
+        &context,
+        &policy,
+        &email,
+        req.captcha_code.as_deref(),
+        req.captcha_account.as_deref(),
+    )
+    .await
+    {
+        return Ok(resp);
+    }
+
+    let smtp_host = KeyValueConfig::get_value(&mut conn, "system.smtp_host", "")
+        .await
+        .unwrap_or_default();
+    let smtp_port = KeyValueConfig::get_value(&mut conn, "system.smtp_port", "465")
+        .await
+        .unwrap_or_else(|_| "465".to_string());
+    let smtp_username = KeyValueConfig::get_value(&mut conn, "system.smtp_username", "")
+        .await
+        .unwrap_or_default();
+    let smtp_password = KeyValueConfig::get_value(&mut conn, "system.smtp_password", "")
+        .await
+        .unwrap_or_default();
+    let smtp_from = KeyValueConfig::get_value(&mut conn, "system.smtp_from", "")
+        .await
+        .unwrap_or_default();
+    let smtp_from_name = KeyValueConfig::get_value(&mut conn, "system.smtp_from_name", "RSLLM")
+        .await
+        .unwrap_or_else(|_| "RSLLM".to_string());
+    let smtp_starttls = KeyValueConfig::get_value(&mut conn, "system.smtp_starttls", "true")
+        .await
+        .unwrap_or_else(|_| "true".to_string());
+
+    if smtp_host.is_empty()
+        || smtp_username.is_empty()
+        || smtp_password.is_empty()
+        || smtp_from.is_empty()
+    {
+        return Ok(Json(ApiResponse::error(
+            "SMTP_NOT_CONFIGURED",
+            "系统未配置发信服务，请联系管理员",
+        )));
+    }
+
+    let port = smtp_port.parse::<u16>().unwrap_or(465);
+    let starttls = !smtp_starttls.eq_ignore_ascii_case("false");
+    let code = format!("{:06}", rand::rng().random_range(0..1_000_000));
+
+    let from_address = match smtp_from.parse() {
+        Ok(v) => v,
+        Err(_) => {
+            return Ok(Json(ApiResponse::error(
+                "SMTP_FROM_INVALID",
+                "发件人邮箱配置无效",
+            )));
+        }
+    };
+
+    let message = match Message::builder()
+        .from(Mailbox::new(Some(smtp_from_name), from_address))
+        .to(match email.parse() {
+            Ok(v) => v,
+            Err(_) => {
+                return Ok(Json(ApiResponse::error("INVALID_EMAIL", "邮箱格式无效")));
+            }
+        })
+        .subject("RSLLM 注册验证码")
+        .body(format!(
+            "您的注册验证码是：{}，10分钟内有效。如非本人操作请忽略。",
+            code
+        )) {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(Json(ApiResponse::error(
+                "EMAIL_BUILD_FAILED",
+                &format!("邮件构造失败: {}", e),
+            )));
+        }
+    };
+
+    let credentials = Credentials::new(smtp_username, smtp_password);
+    let mailer = if starttls {
+        match AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp_host) {
+            Ok(builder) => builder.port(port).credentials(credentials).build(),
+            Err(e) => {
+                return Ok(Json(ApiResponse::error(
+                    "SMTP_RELAY_FAILED",
+                    &format!("SMTP配置错误: {}", e),
+                )));
+            }
+        }
+    } else {
+        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&smtp_host)
+            .port(port)
+            .credentials(credentials)
+            .build()
+    };
+
+    if let Err(e) = mailer.send(message).await {
+        return Ok(Json(ApiResponse::error(
+            "EMAIL_SEND_FAILED",
+            &format!("验证码发送失败: {}", e),
+        )));
+    }
+
+    let cache_key = format!("auth:register:email_code:{}", email);
+    if let Err(e) = context
+        .cache_service
+        .set_string_ex(&cache_key, &code, Some(Duration::from_secs(600)))
+        .await
+    {
+        return Ok(Json(ApiResponse::error(
+            "CACHE_SET_FAILED",
+            &format!("验证码缓存失败: {}", e),
+        )));
+    }
+
+    Ok(Json(ApiResponse::success(serde_json::json!({
+        "message": "验证码已发送，请查收邮箱"
+    }))))
 }

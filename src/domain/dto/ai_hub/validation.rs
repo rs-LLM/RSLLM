@@ -197,7 +197,10 @@ impl Validator {
                                     return Err(format!("消息{}的文本内容不能为空", i));
                                 }
                                 if text.len() > max_length {
-                                    return Err(format!("消息{}的文本内容过长（最大{}字符）", i, max_length));
+                                    return Err(format!(
+                                        "消息{}的文本内容过长（最大{}字符）",
+                                        i, max_length
+                                    ));
                                 }
                             }
                         }

@@ -130,6 +130,14 @@ impl ICacheService for MemCacheService {
         Ok(v)
     }
 
+    // 用途：删除缓存键
+    // 说明：从内存缓存中移除指定键
+    async fn del(&self, k: &str) -> Result<()> {
+        self.recycling();
+        self.cache.remove(&k.to_string());
+        Ok(())
+    }
+
     // 用途：设置带过期时间的字符串缓存
     // 说明：将键值对存储到内存缓存中，并设置过期时间
     async fn set_string_ex(&self, k: &str, v: &str, t: Option<Duration>) -> Result<String> {

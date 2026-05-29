@@ -12,7 +12,7 @@ use crate::domain::dto::rbac::{
 // 说明：用于数据库操作
 use crate::domain::table::rbac::RbacRolePermission;
 
-// 用途：导入角色VO
+// 用途：导入角色视图对象
 // 说明：用于返回角色数据
 use crate::domain::vo::rbac::SysRoleVO;
 

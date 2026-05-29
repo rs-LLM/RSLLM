@@ -1,3 +1,6 @@
+//! 聊天完成响应视图对象模块。
+//! 定义聊天完成结果与候选项结构，供 AI Hub 聊天接口对外返回。
+
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据传输
 use serde::{Deserialize, Serialize};
@@ -15,8 +18,8 @@ use crate::domain::dto::logprob::LogProbs;
 // 说明：用于统计资源使用情况
 use super::usage::Usage;
 
-// 用途：聊天完成响应结构体
-// 说明：用于表示完整的聊天响应，包含所有生成的内容和统计信息
+/// 聊天完成响应结构体。
+/// 表示单次聊天请求的完整响应，包含生成候选与用量统计。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct ChatCompletion {
     // 用途：响应ID
@@ -44,8 +47,8 @@ pub struct ChatCompletion {
     pub system_fingerprint: Option<String>,
 }
 
-// 用途：聊天完成选择结构体
-// 说明：用于表示单个聊天响应的选择结果，包含消息内容和结束原因
+/// 聊天完成候选项结构体。
+/// 表示 `choices` 中的单个生成结果及其结束原因。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct ChatCompletionChoice {
     // 用途：选择索引

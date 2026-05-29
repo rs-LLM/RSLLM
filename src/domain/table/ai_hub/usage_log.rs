@@ -37,11 +37,14 @@ pub struct AiHubUsageLog {
     // 说明：输入和输出token的总和
     pub total_tokens: i64,
     // 用途：输入单价
-    // 说明：输入tokens的单价（每1K tokens）
+    // 说明：输入tokens的单价（按 price_unit 解释）
     pub input_price: f64,
     // 用途：输出单价
-    // 说明：输出tokens的单价（每1K tokens）
+    // 说明：输出tokens的单价（按 price_unit 解释）
     pub output_price: f64,
+    // 用途：价格单位
+    // 说明："k"=每 1K tokens，"m"=每 1M tokens；缺失默认按 "k" 解释
+    pub price_unit: Option<String>,
     // 用途：输入费用
     // 说明：本次请求的输入费用
     pub input_cost: Option<f64>,
@@ -78,6 +81,18 @@ pub struct AiHubUsageLog {
     // 用途：请求类型
     // 说明：请求的类型，如"chat"、"completion"等
     pub request_type: Option<String>,
+    // 用途：API来源标识
+    // 说明：记录真实入口（如 chat/messages/responses/embeddings/chat_ws 等）
+    pub api: Option<String>,
+
+    // 用途：上游 OAuth 账号归因（提升为列）
+    // 说明：优先用于 /usage-logs 展示与 OAuth 面板 tokens 聚合归因
+    pub upstream_oauth_provider_id: Option<String>,
+    pub upstream_oauth_provider_type: Option<String>,
+    pub upstream_oauth_account_key: Option<String>,
+    pub upstream_oauth_account_id: Option<String>,
+    pub upstream_oauth_email: Option<String>,
+
     // 用途：状态
     // 说明：请求的状态，如"success"、"failed"等
     pub status: Option<String>,

@@ -9,6 +9,7 @@ use rsllm::service::ProviderConfigService;
 // 用途：导入路由模块
 // 说明：用于构建HTTP路由
 use rsllm::router::create_app_router;
+use rsllm::router::openai_router::create_openai_router;
 
 // 用途：导入表结构相关模块
 // 说明：用于同步数据库表结构
@@ -24,10 +25,16 @@ use rbs::value;
 
 // 用途：导入CORS中间件
 // 说明：用于处理跨域请求
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 // 用途：导入请求体限制中间件
 // 说明：用于设置请求体大小限制
+use axum::Router;
+use axum::http::{
+    Method,
+    header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE},
+};
+use axum::routing::get;
 use tower_http::limit::RequestBodyLimitLayer;
 
 // 用途：导入OpenAPI相关模块
@@ -38,7 +45,9 @@ use utoipa_swagger_ui::SwaggerUi;
 
 // 用途：导入信号处理模块
 // 说明：用于捕获 Ctrl+C 和 SIGTERM 信号，实现优雅关闭
+use std::sync::Arc;
 use tokio::signal;
+use tokio::time::{Duration as TokioDuration, interval};
 
 /// 用途：主函数入口
 /// 说明：应用程序的启动点，负责初始化和启动服务器
@@ -113,11 +122,75 @@ async fn main() -> std::io::Result<()> {
     // 说明：美化日志输出，便于区分不同阶段的日志
     log::info!("[rsllm] ------------------------------------------------------------------------");
 
+    let shared_context = Arc::new(CONTEXT.clone());
+
+    {
+        let maintenance_context = shared_context.clone();
+        tokio::spawn(async move {
+            let mut ticker = interval(TokioDuration::from_secs(300));
+            loop {
+                ticker.tick().await;
+                if let Err(e) =
+                    rsllm::controller::ai_hub::subscription_controller::run_subscription_maintenance(
+                        &maintenance_context,
+                    )
+                    .await
+                {
+                    log::error!("[rsllm] Subscription maintenance failed: {}", e);
+                }
+            }
+        });
+    }
+
     // 用途：创建完整的应用路由
     // 说明：使用新的router模块组织路由
     // 注意：由于ServiceContext没有实现Clone，我们直接使用CONTEXT
     // 这里需要修改router设计，使用引用传递
-    let app_router = create_app_router(std::sync::Arc::new(CONTEXT.clone()));
+    let app_router = create_app_router(shared_context.clone());
+
+    // 用途：启动本地Codex OAuth回调监听（兼容CLIProxy预注册回调）
+    // 说明：默认监听 http://localhost:1455/auth/callback
+    if let Ok(callback_url) = url::Url::parse(CONTEXT.config.codex_oauth_callback_url.as_str()) {
+        if matches!(
+            callback_url.host_str(),
+            Some("localhost") | Some("127.0.0.1")
+        ) {
+            if let Some(port) = callback_url.port_or_known_default() {
+                let callback_bind = format!("127.0.0.1:{}", port);
+                match tokio::net::TcpListener::bind(callback_bind.as_str()).await {
+                    Ok(callback_listener) => {
+                        let callback_state = std::sync::Arc::new(CONTEXT.clone());
+                        let callback_router = Router::new()
+                            .route(
+                                "/auth/callback",
+                                get(rsllm::controller::ai_hub::provider_config_controller::provider_oauth_public_callback),
+                            )
+                            .with_state(callback_state);
+
+                        tokio::spawn(async move {
+                            if let Err(e) =
+                                axum::serve(callback_listener, callback_router.into_make_service())
+                                    .await
+                            {
+                                log::error!("[rsllm] OAuth callback listener stopped: {}", e);
+                            }
+                        });
+                        log::info!(
+                            "[rsllm] OAuth callback listener started on {}",
+                            callback_bind
+                        );
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "[rsllm] Failed to bind OAuth callback listener on {}: {}",
+                            callback_bind,
+                            e
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     // 用途：配置OpenAPI文档
     // 说明：设置API基本信息和服务器配置
@@ -126,6 +199,9 @@ async fn main() -> std::io::Result<()> {
         paths(
             // 认证相关接口
             rsllm::controller::rbac::rbac_user_controller::login,
+            rsllm::controller::sys::sys_oauth_controller::generate_oauth_state,
+            rsllm::controller::sys::sys_oauth_controller::handle_oauth_callback,
+            rsllm::controller::sys::sys_auth_controller::login,
             rsllm::controller::sys::sys_auth_controller::check,
             rsllm::controller::sys::sys_auth_controller::refresh_token,
             rsllm::controller::sys::sys_auth_controller::logout,
@@ -151,20 +227,51 @@ async fn main() -> std::io::Result<()> {
             rsllm::controller::ai_hub::provider_config_controller::get_provider,
             // 聊天补全接口
             rsllm::controller::ai_hub::chat_controller::chat_completions,
+            rsllm::router::openai_router::list_v1_models,
+            rsllm::router::openai_router::create_v1_completions_alias,
+            rsllm::router::openai_router::create_v1_messages_alias,
+            rsllm::router::openai_router::create_v1_chat_completions,
+            rsllm::router::openai_router::create_v1_embeddings,
+            rsllm::router::openai_router::create_v1_response,
+            rsllm::router::openai_router::create_v1_compact_response_alias,
+            rsllm::router::openai_router::get_v1_dashboard_billing_subscription,
+            rsllm::router::openai_router::get_v1_dashboard_billing_usage,
+            rsllm::controller::sys::sys_service_controller::get_public_user_agreement,
+            rsllm::controller::sys::sys_service_controller::get_public_privacy_policy,
+            rsllm::router::ai_hub_router::create_completions_alias,
+            rsllm::router::ai_hub_router::create_messages_alias,
+            rsllm::router::ai_hub_router::create_compact_response_alias,
+            // OpenAI/Gemini beta 模型列表兼容接口
+            rsllm::router::openai_router::list_v1beta_models,
+            rsllm::router::openai_router::list_v1beta_openai_models,
             // 嵌入生成接口
             rsllm::controller::ai_hub::embedding_controller::embeddings,
+            rsllm::controller::ai_hub::responses_controller::create_response,
             // 交易管理接口
             rsllm::controller::ai_hub::transaction_controller::list,
+            rsllm::controller::ai_hub::transaction_controller::summary,
             // 余额管理接口
             rsllm::controller::ai_hub::balance_controller::get_balance,
             rsllm::controller::ai_hub::balance_controller::recharge,
             rsllm::controller::ai_hub::balance_controller::deduct,
             rsllm::controller::ai_hub::balance_controller::set_balance,
+            rsllm::controller::ai_hub::checkin_controller::get_checkin_status,
+            rsllm::controller::ai_hub::checkin_controller::do_checkin,
+            rsllm::controller::sys::twofa_controller::get_twofa_status,
+            rsllm::controller::sys::twofa_controller::setup_twofa,
+            rsllm::controller::sys::twofa_controller::enable_twofa,
+            rsllm::controller::sys::twofa_controller::disable_twofa,
+            rsllm::controller::sys::twofa_controller::regenerate_backup_codes,
+            rsllm::controller::sys::twofa_controller::verify_login_twofa,
+            rsllm::controller::sys::twofa_controller::admin_reset_twofa,
+            rsllm::controller::sys::twofa_controller::admin_twofa_stats,
         ),
         components(
             schemas(
                 // 响应格式
                 rsllm::domain::vo::response::ApiResponse<rsllm::domain::vo::basic::RefreshTokenVO>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::domain::vo::basic::LoginVO>,
+                rsllm::domain::vo::response::ApiResponse<serde_json::Value>,
                 rsllm::domain::vo::response::ApiResponse<String>,
                 rsllm::domain::vo::response::ApiResponse<bool>,
                 rsllm::domain::vo::response::ApiResponse<u64>,
@@ -179,10 +286,19 @@ async fn main() -> std::io::Result<()> {
                 rsllm::domain::vo::response::ApiResponse<Vec<rsllm::domain::vo::rbac::RbacPermissionAuditLogVO>>,
                 // 交易相关响应
                 rsllm::domain::vo::response::ApiResponse<rsllm::controller::ai_hub::transaction_controller::TransactionListResponse>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::controller::ai_hub::transaction_controller::TransactionSummaryResponse>,
                 // 余额相关响应
                 rsllm::domain::vo::response::ApiResponse<rsllm::domain::vo::ai_hub::BalanceVO>,
                 rsllm::domain::vo::response::ApiResponse<rsllm::controller::ai_hub::balance_controller::RechargeResponse>,
                 rsllm::domain::vo::response::ApiResponse<rsllm::controller::ai_hub::balance_controller::DeductResponse>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::controller::ai_hub::checkin_controller::CheckinStatusData>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::controller::ai_hub::checkin_controller::DoCheckinData>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::domain::dto::basic::twofa::TwoFaStatusResponse>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::domain::dto::basic::twofa::TwoFaSetupResponse>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::domain::dto::basic::twofa::TwoFaBackupCodesResponse>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::controller::sys::twofa_controller::NeedTwoFaResponse>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::domain::dto::basic::twofa::TwoFaAdminStatsResponse>,
+                rsllm::domain::vo::response::ApiResponse<rsllm::domain::vo::SignInVO>,
                 // 基础类型
                 rsllm::domain::vo::basic::RefreshTokenVO,
                 rsllm::domain::vo::response::PageWrapper<rsllm::domain::vo::basic::sys_dict::SysDictVO>,
@@ -213,10 +329,27 @@ async fn main() -> std::io::Result<()> {
                 rsllm::domain::table::ai_hub::provider_config::ProviderConfig,
                 // 聊天补全相关
                 rsllm::service::ai_hub::DtoChatCompletionRequest,
+                rsllm::domain::dto::ai_hub::completion::CompletionAliasRequest,
+                rsllm::domain::dto::ai_hub::messages::ClaudeMessagesRequest,
                 rsllm::domain::vo::ai_hub::chat::ChatCompletion,
+                rsllm::domain::vo::ai_hub::messages::ClaudeMessageResponse,
+                rsllm::domain::vo::ai_hub::messages::ClaudeErrorResponse,
+                rsllm::domain::vo::ai_hub::messages::ClaudeErrorBody,
+                rsllm::domain::vo::ai_hub::messages::ClaudeContentBlock,
+                rsllm::domain::vo::ai_hub::messages::ClaudeUsage,
+                rsllm::domain::vo::ai_hub::messages::ClaudeMessageStartEvent,
+                rsllm::domain::vo::ai_hub::messages::ClaudeContentBlockStartEvent,
+                rsllm::domain::vo::ai_hub::messages::ClaudeContentBlockDeltaEvent,
+                rsllm::domain::vo::ai_hub::messages::ClaudeContentBlockStopEvent,
+                rsllm::domain::vo::ai_hub::messages::ClaudeMessageDeltaEvent,
+                rsllm::domain::vo::ai_hub::messages::ClaudeMessageStopEvent,
+                rsllm::domain::vo::ai_hub::messages::ClaudeErrorEvent,
                 rsllm::service::ai_hub::ChatCompletionMessage,
                 rsllm::domain::vo::ai_hub::chat::ChatCompletionChoice,
                 rsllm::domain::vo::ai_hub::usage::Usage,
+                rsllm::controller::ai_hub::model_controller::OpenAIModelsListResponse,
+                rsllm::controller::ai_hub::model_controller::OpenAIModelInfo,
+                rsllm::controller::ai_hub::model_controller::OpenAIProviderInfo,
                 // 嵌入生成相关
                 rsllm::domain::dto::ai_hub::embeddings::EmbeddingsRequest,
                 rsllm::domain::vo::ai_hub::embeddings::EmbeddingsResponse,
@@ -231,9 +364,22 @@ async fn main() -> std::io::Result<()> {
                 rsllm::domain::dto::ai_hub::DeductDTO,
                 rsllm::domain::dto::ai_hub::SetBalanceDTO,
                 rsllm::domain::vo::ai_hub::BalanceVO,
-                rsllm::controller::ai_hub::balance_controller::GetBalanceRequest,
-                rsllm::controller::ai_hub::balance_controller::RechargeResponse,
-                rsllm::controller::ai_hub::balance_controller::DeductResponse,
+                rsllm::controller::ai_hub::checkin_controller::CheckinStatusQuery,
+                rsllm::controller::ai_hub::checkin_controller::CheckinRecordVO,
+                rsllm::controller::ai_hub::checkin_controller::CheckinStatsVO,
+                rsllm::controller::ai_hub::checkin_controller::CheckinStatusData,
+                rsllm::controller::ai_hub::checkin_controller::DoCheckinData,
+                rsllm::domain::dto::ai_hub::dashboard_billing::OpenAISubscriptionResponse,
+                rsllm::domain::dto::ai_hub::dashboard_billing::OpenAIUsageResponse,
+                rsllm::controller::sys::sys_service_controller::PublicLegalResponse,
+                rsllm::domain::dto::basic::twofa::TwoFaStatusResponse,
+                rsllm::domain::dto::basic::twofa::TwoFaSetupResponse,
+                rsllm::domain::dto::basic::twofa::TwoFaEnableRequest,
+                rsllm::domain::dto::basic::twofa::TwoFaDisableRequest,
+                rsllm::domain::dto::basic::twofa::TwoFaBackupCodesResponse,
+                rsllm::domain::dto::basic::twofa::TwoFaVerifyLoginRequest,
+                rsllm::domain::dto::basic::twofa::TwoFaAdminStatsResponse,
+                rsllm::controller::sys::twofa_controller::NeedTwoFaResponse,
             )
         ),
         tags(
@@ -267,13 +413,73 @@ async fn main() -> std::io::Result<()> {
 
     // 用途：配置CORS
     // 说明：允许跨域请求，便于前端与后端分离部署
+    let allow_origin = AllowOrigin::predicate(|origin: &axum::http::HeaderValue, _| {
+        matches!(
+            origin.to_str().ok(),
+            Some("http://127.0.0.1:5777") | Some("http://localhost:5777")
+        )
+    });
+
     let cors = CorsLayer::new()
-        .allow_origin(Any) // 用途：允许任何来源
-        // 说明：开发环境下方便调试，生产环境应限制来源
-        .allow_methods(Any) // 用途：允许任何HTTP方法
-        // 说明：支持所有HTTP请求方法
-        .allow_headers(Any); // 用途：允许任何HTTP头
-    // 说明：支持所有自定义头信息
+        .allow_origin(allow_origin) // 用途：允许本地前端来源
+        // 说明：凭证请求不能与通配符来源同时使用，需显式列出开发源
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        // 说明：覆盖当前前后端实际会用到的 HTTP 方法
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
+        // 说明：凭证请求下不能继续使用通配符请求头
+        .allow_credentials(true); // 用途：允许浏览器在跨域请求中携带凭证
+
+    let cors = Arc::new(cors);
+
+    // 用途：启动 OpenAI 兼容 API 独立端口（可选）
+    // 说明：当启用时，对外暴露 /v1/* 风格接口，复用相同鉴权与配额中间件
+    if CONTEXT.config.openai_enabled {
+        if let Some(openai_port) = CONTEXT.config.openai_port {
+            let openai_bind = CONTEXT.config.openai_bind.clone();
+            let openai_listener_address = format!("{}:{}", openai_bind, openai_port);
+
+            match tokio::net::TcpListener::bind(openai_listener_address.as_str()).await {
+                Ok(openai_listener) => {
+                    let openai_router = create_openai_router(shared_context.clone())
+                        .layer(cors.as_ref().clone())
+                        .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
+                        .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024));
+
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            axum::serve(openai_listener, openai_router.into_make_service()).await
+                        {
+                            log::error!("[rsllm] OpenAI listener stopped: {}", e);
+                        }
+                    });
+
+                    log::info!(
+                        "[rsllm] OpenAI compatible API listener started on http://{}{}",
+                        openai_listener_address,
+                        "/v1"
+                    );
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[rsllm] Failed to bind OpenAI listener on {}: {}",
+                        openai_listener_address,
+                        e
+                    );
+                }
+            }
+        } else {
+            log::warn!(
+                "[rsllm] openai_enabled=true but openai_port is not set; skip OpenAI listener"
+            );
+        }
+    }
 
     // 用途：创建TCP监听器
     // 说明：监听指定的服务器地址和端口
@@ -291,7 +497,7 @@ async fn main() -> std::io::Result<()> {
         // 说明：提供API文档界面
         .merge(scalar_ui) // 用途：添加Scalar UI路由
         // 说明：提供另一种API文档界面
-        .layer(cors) // 用途：添加CORS中间件
+        .layer(cors.as_ref().clone()) // 用途：添加CORS中间件
         // 说明：处理跨域请求
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 用途：设置默认请求体大小限制
         // 说明：限制单个请求的大小，防止恶意请求
@@ -305,9 +511,10 @@ async fn main() -> std::io::Result<()> {
         #[cfg(unix)]
         {
             // 在 Unix 系统上，同时监听 Ctrl+C 和 SIGTERM 信号
-            use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
-            
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
+
             tokio::select! {
                 _ = signal::ctrl_c() => {
                     log::info!("[rsllm] Received Ctrl+C signal, initiating graceful shutdown...");
@@ -317,7 +524,7 @@ async fn main() -> std::io::Result<()> {
                 }
             }
         }
-        
+
         #[cfg(not(unix))]
         {
             // 在非 Unix 系统上，只监听 Ctrl+C 信号

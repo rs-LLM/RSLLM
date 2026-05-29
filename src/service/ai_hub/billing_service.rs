@@ -3,12 +3,106 @@
 use crate::domain::table::ai_hub::transaction::Transaction;
 use crate::domain::table::ai_hub::usage_log::AiHubUsageLog;
 use crate::domain::table::basic::SysUser;
-use crate::domain::vo::usage_log::AiHubUsageLogVO;
+use crate::domain::vo::ai_hub::usage_log::AiHubUsageLogVO;
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::pool;
 use rbatis::rbdc::DateTime;
 use std::cmp::min;
 use std::str::FromStr;
+
+/// 用量日志写入元信息
+#[derive(Clone, Debug)]
+pub struct UsageLogMeta {
+    pub request_method: String,
+    pub request_path: String,
+    pub request_type: String,
+    pub api: String,
+    pub status_code: i32,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+impl UsageLogMeta {
+    fn new(
+        request_method: &'static str,
+        request_path: &'static str,
+        request_type: &'static str,
+        api: &'static str,
+        status_code: i32,
+        ip_address: Option<String>,
+        user_agent: Option<String>,
+    ) -> Self {
+        Self {
+            request_method: request_method.to_string(),
+            request_path: request_path.to_string(),
+            request_type: request_type.to_string(),
+            api: api.to_string(),
+            status_code,
+            ip_address,
+            user_agent,
+        }
+    }
+
+    pub fn chat_completions(ip_address: Option<String>, user_agent: Option<String>) -> Self {
+        Self::new(
+            "POST",
+            "/api/v1/chat/completions",
+            "chat",
+            "chat",
+            200,
+            ip_address,
+            user_agent,
+        )
+    }
+
+    pub fn chat_ws(ip_address: Option<String>, user_agent: Option<String>) -> Self {
+        Self::new(
+            "GET",
+            "/api/v1/chat/completions/ws",
+            "chat",
+            "chat_ws",
+            101,
+            ip_address,
+            user_agent,
+        )
+    }
+
+    pub fn embeddings(ip_address: Option<String>, user_agent: Option<String>) -> Self {
+        Self::new(
+            "POST",
+            "/api/v1/embeddings",
+            "embeddings",
+            "embeddings",
+            200,
+            ip_address,
+            user_agent,
+        )
+    }
+
+    pub fn responses(ip_address: Option<String>, user_agent: Option<String>) -> Self {
+        Self::new(
+            "POST",
+            "/api/v1/responses",
+            "responses",
+            "responses",
+            200,
+            ip_address,
+            user_agent,
+        )
+    }
+
+    pub fn messages(ip_address: Option<String>, user_agent: Option<String>) -> Self {
+        Self::new(
+            "POST",
+            "/api/v1/messages",
+            "messages",
+            "messages",
+            200,
+            ip_address,
+            user_agent,
+        )
+    }
+}
 
 /// 计算费用并检查配额参数
 pub struct CalculateAndCheckParams<'a> {
@@ -36,6 +130,7 @@ pub struct QuickBillParams<'a> {
     pub duration_ms: i64,
     pub status: &'a str,
     pub extra: Option<serde_json::Value>,
+    pub meta: &'a UsageLogMeta,
 }
 
 /// 查询用量记录参数
@@ -96,10 +191,9 @@ impl BillingService {
     pub async fn deduct_quota_and_log(
         &self,
         fee: &CalculatedFee,
-        api_key: &str,
-        duration_ms: i64,
-        _status: &str,
-        _extra: Option<serde_json::Value>,
+        meta: &UsageLogMeta,
+        extra: Option<serde_json::Value>,
+        upstream: Option<crate::service::ai_hub::provider::upstream_trace::UpstreamOAuthInfo>,
     ) -> ApplicationResult<String> {
         // 使用事务保证原子性
         let tx = pool!().acquire_begin().await?;
@@ -128,32 +222,39 @@ impl BillingService {
             id: Some(log_id.clone()),
             user_id: fee.user_id.clone(),
             model_id: fee.model_id.clone(),
-            api_key: api_key.to_string(),
+            api_key: fee.api_key.clone(),
             input_tokens: fee.input_tokens,
-            output_tokens: 0,
-            total_tokens: fee.input_tokens,
+            output_tokens: fee.output_tokens,
+            total_tokens: fee.total_tokens,
             input_price: fee.input_price,
             output_price: fee.output_price,
+            price_unit: Some("k".to_string()),
             input_cost: Some(fee.input_cost),
-            output_cost: Some(0.0),
-            total_cost: fee.input_cost,
+            output_cost: Some(fee.output_cost),
+            total_cost: fee.total_cost,
             currency: Some("USD".to_string()),
-            request_method: Some("POST".to_string()),
-            request_path: Some("/api/v1/chat/completions".to_string()),
+            request_method: Some(meta.request_method.clone()),
+            request_path: Some(meta.request_path.clone()),
             request_headers: None,
             request_body: None,
-            status_code: Some(200),
-            request_type: Some("chat".to_string()),
-            status: Some(_status.to_string()),
+            status_code: Some(meta.status_code),
+            request_type: Some(meta.request_type.clone()),
+            api: Some(meta.api.clone()),
+            upstream_oauth_provider_id: upstream.as_ref().map(|v| v.provider_id.clone()),
+            upstream_oauth_provider_type: upstream.as_ref().map(|v| v.provider_type.clone()),
+            upstream_oauth_account_key: upstream.as_ref().map(|v| v.account_key.clone()),
+            upstream_oauth_account_id: upstream.as_ref().map(|v| v.account_id.clone()),
+            upstream_oauth_email: upstream.as_ref().and_then(|v| v.email.clone()),
+            status: Some("success".to_string()),
             request_time: Some(now.clone()),
             response_time: Some(now.clone()),
-            response_time_ms: Some(duration_ms),
+            response_time_ms: Some(0), // 无法在此处获取真实耗时，由 controller 在 complete_usage_log 写入
             error_message: None,
-            extra: _extra,
+            extra,
             quota_deducted: Some(1),
             quota_snapshot: None,
-            ip_address: None,
-            user_agent: None,
+            ip_address: meta.ip_address.clone(),
+            user_agent: meta.user_agent.clone(),
             created_at: Some(now),
         };
 
@@ -216,14 +317,8 @@ impl BillingService {
             .await?;
 
         // 2. 扣减配额并记录用量
-        self.deduct_quota_and_log(
-            &fee,
-            &params.api_key,
-            params.duration_ms,
-            params.status,
-            params.extra.clone(),
-        )
-        .await
+        self.deduct_quota_and_log(&fee, params.meta, params.extra.clone(), None)
+            .await
     }
 
     /// 查询用量记录
@@ -355,7 +450,7 @@ impl BillingService {
 
         let balance_before = user.balance.unwrap_or(0.0);
         let balance_after = balance_before + fee.input_cost;
-        
+
         let mut updated_user = user.clone();
         updated_user.balance = Some(balance_after);
         SysUser::update_by_map(&tx, &updated_user, rbs::value! {"id": &fee.user_id}).await?;
@@ -397,9 +492,8 @@ impl BillingService {
     pub async fn pre_deduct_quota_and_log(
         &self,
         fee: &CalculatedFee,
-        _duration_ms: i64,
-        _status: &str,
-        _extra: Option<serde_json::Value>,
+        meta: &UsageLogMeta,
+        extra: Option<serde_json::Value>,
     ) -> ApplicationResult<String> {
         // 使用事务保证原子性
         let tx = pool!().acquire_begin().await?;
@@ -436,13 +530,54 @@ impl BillingService {
                 "AI服务调用预扣减: model={}, input_tokens={}",
                 fee.model_id, fee.input_tokens
             ),
-            created_at: Some(now),
+            created_at: Some(now.clone()),
         };
         Transaction::insert(&tx, &transaction).await?;
 
+        let log_id = ulid::Ulid::new().to_string();
+        let usage_log = AiHubUsageLog {
+            id: Some(log_id.clone()),
+            user_id: fee.user_id.clone(),
+            model_id: fee.model_id.clone(),
+            api_key: fee.api_key.clone(),
+            input_tokens: fee.input_tokens,
+            output_tokens: 0,
+            total_tokens: fee.input_tokens,
+            input_price: fee.input_price,
+            output_price: fee.output_price,
+            price_unit: Some("k".to_string()),
+            input_cost: Some(fee.input_cost),
+            output_cost: Some(0.0),
+            total_cost: fee.input_cost,
+            currency: Some("USD".to_string()),
+            request_method: Some(meta.request_method.clone()),
+            request_path: Some(meta.request_path.clone()),
+            request_headers: None,
+            request_body: None,
+            status_code: Some(meta.status_code),
+            request_type: Some(meta.request_type.clone()),
+            api: Some(meta.api.clone()),
+            upstream_oauth_provider_id: None,
+            upstream_oauth_provider_type: None,
+            upstream_oauth_account_key: None,
+            upstream_oauth_account_id: None,
+            upstream_oauth_email: None,
+            status: Some("pending".to_string()),
+            request_time: Some(now.clone()),
+            response_time: Some(now.clone()),
+            response_time_ms: Some(0),
+            error_message: None,
+            extra,
+            quota_deducted: Some(1),
+            quota_snapshot: None,
+            ip_address: meta.ip_address.clone(),
+            user_agent: meta.user_agent.clone(),
+            created_at: Some(now),
+        };
+        AiHubUsageLog::insert(&tx, &usage_log).await?;
+
         tx.commit().await?;
 
-        let log_id = ulid::Ulid::new().to_string();
         log::info!(
             "[BillingService] Pre-deduct successful: user_id={}, log_id={}, input_cost={:.2}, balance_before={:.2}, balance_after={:.2}, transaction_id={}",
             fee.user_id,
@@ -460,43 +595,40 @@ impl BillingService {
     /// 在AI服务调用完成后，计算实际输出费用，调整余额，并创建完整的用量记录
     pub async fn complete_usage_log(
         &self,
+        fee: &CalculatedFee,
         log_id: &str,
-        user_id: &str,
-        model_id: &str,
-        api_key: &str,
-        input_tokens: i64,
-        actual_output_tokens: i64,
-        input_price: f64,
-        output_price: f64,
+        meta: &UsageLogMeta,
+        output_tokens: i64,
         duration_ms: i64,
         extra: Option<serde_json::Value>,
+        upstream: Option<crate::service::ai_hub::provider::upstream_trace::UpstreamOAuthInfo>,
     ) -> ApplicationResult<()> {
         log::info!(
-            "[BillingService] complete_usage_log called: log_id={}, user_id={}, model_id={}, input_tokens={}, actual_output_tokens={}, input_price={:.6}, output_price={:.6}",
+            "[BillingService] complete_usage_log called: log_id={}, user_id={}, model_id={}, input_tokens={}, output_tokens={}, input_price={:.6}, output_price={:.6}",
             log_id,
-            user_id,
-            model_id,
-            input_tokens,
-            actual_output_tokens,
-            input_price,
-            output_price
+            fee.user_id,
+            fee.model_id,
+            fee.input_tokens,
+            output_tokens,
+            fee.input_price,
+            fee.output_price
         );
 
         let tx = pool!().acquire_begin().await?;
 
         // 1. 计算费用
-        let input_cost = input_tokens as f64 * input_price / 1000.0;
-        let output_cost = actual_output_tokens as f64 * output_price / 1000.0;
+        let input_cost = fee.input_tokens as f64 * fee.input_price / 1000.0;
+        let output_cost = output_tokens as f64 * fee.output_price / 1000.0;
         let total_cost = input_cost + output_cost;
 
         // 2. 扣减输出费用
-        let users = SysUser::select_by_map(&tx, rbs::value! { "id": user_id }).await?;
+        let users = SysUser::select_by_map(&tx, rbs::value! { "id": &fee.user_id }).await?;
         if users.is_empty() {
             tx.rollback().await?;
             return Err(ApplicationError::NotFound {
                 message: "User not found".to_string(),
                 resource: Some("user".to_string()),
-                id: Some(user_id.to_string()),
+                id: Some(fee.user_id.clone()),
             });
         }
 
@@ -504,48 +636,55 @@ impl BillingService {
         let balance_before = user.balance.unwrap_or(0.0);
         let balance_after = balance_before - output_cost;
         user.balance = Some(balance_after);
-        SysUser::update_by_map(&tx, &user, rbs::value! { "id": user_id }).await?;
+        SysUser::update_by_map(&tx, &user, rbs::value! { "id": &fee.user_id }).await?;
 
         // 创建扣费交易记录
         let now = DateTime::now();
         let transaction_id = ulid::Ulid::new().to_string();
         let transaction = Transaction {
             id: Some(transaction_id.clone()),
-            user_id: user_id.to_string(),
+            user_id: fee.user_id.clone(),
             type_: "deduct".to_string(),
-            amount: total_cost,
+            amount: output_cost,
             balance_before,
             balance_after,
             operator_id: None,
             reason: format!(
-                "AI服务调用: model={}, input_tokens={}, output_tokens={}",
-                model_id, input_tokens, actual_output_tokens
+                "AI服务调用扣减输出费用: model={}, input_tokens={}, output_tokens={}",
+                fee.model_id, fee.input_tokens, output_tokens
             ),
             created_at: Some(now.clone()),
         };
         Transaction::insert(&tx, &transaction).await?;
 
-        // 3. 创建完整的用量记录
+        // 3. 更新用量记录（预扣阶段已创建记录）
         let usage_log = AiHubUsageLog {
             id: Some(log_id.to_string()),
-            user_id: user_id.to_string(),
-            model_id: model_id.to_string(),
-            api_key: api_key.to_string(),
-            input_tokens,
-            output_tokens: actual_output_tokens,
-            total_tokens: input_tokens + actual_output_tokens,
-            input_price,
-            output_price,
+            user_id: fee.user_id.clone(),
+            model_id: fee.model_id.clone(),
+            api_key: fee.api_key.clone(),
+            input_tokens: fee.input_tokens,
+            output_tokens,
+            total_tokens: fee.input_tokens.saturating_add(output_tokens),
+            input_price: fee.input_price,
+            output_price: fee.output_price,
+            price_unit: Some("k".to_string()),
             input_cost: Some(input_cost),
             output_cost: Some(output_cost),
             total_cost,
             currency: Some("USD".to_string()),
-            request_method: Some("POST".to_string()),
-            request_path: Some("/api/v1/chat/completions".to_string()),
+            request_method: Some(meta.request_method.clone()),
+            request_path: Some(meta.request_path.clone()),
             request_headers: None,
             request_body: None,
-            status_code: Some(200),
-            request_type: Some("chat".to_string()),
+            status_code: Some(meta.status_code),
+            request_type: Some(meta.request_type.clone()),
+            api: Some(meta.api.clone()),
+            upstream_oauth_provider_id: upstream.as_ref().map(|v| v.provider_id.clone()),
+            upstream_oauth_provider_type: upstream.as_ref().map(|v| v.provider_type.clone()),
+            upstream_oauth_account_key: upstream.as_ref().map(|v| v.account_key.clone()),
+            upstream_oauth_account_id: upstream.as_ref().map(|v| v.account_id.clone()),
+            upstream_oauth_email: upstream.as_ref().and_then(|v| v.email.clone()),
             status: Some("success".to_string()),
             request_time: Some(now.clone()),
             response_time: Some(now.clone()),
@@ -554,20 +693,20 @@ impl BillingService {
             extra,
             quota_deducted: Some(1),
             quota_snapshot: None,
-            ip_address: None,
-            user_agent: None,
-            created_at: Some(now),
+            ip_address: meta.ip_address.clone(),
+            user_agent: meta.user_agent.clone(),
+            created_at: Some(now.clone()),
         };
 
-        AiHubUsageLog::insert(&tx, &usage_log).await?;
+        AiHubUsageLog::update_by_map(&tx, &usage_log, rbs::value! {"id": log_id}).await?;
         tx.commit().await?;
 
         log::info!(
             "[BillingService] Usage log completed: log_id={}, user_id={}, input_tokens={}, output_tokens={}, input_cost={:.2}, output_cost={:.2}, total_cost={:.2}, balance_before={:.2}, balance_after={:.2}",
             log_id,
-            user_id,
-            input_tokens,
-            actual_output_tokens,
+            fee.user_id,
+            fee.input_tokens,
+            output_tokens,
             input_cost,
             output_cost,
             total_cost,
@@ -614,10 +753,21 @@ impl BillingService {
             total_cost: log.total_cost,
             input_price: log.input_price,
             output_price: log.output_price,
+            price_unit: log.price_unit,
             status_code,
             error_message: log.error_message,
             request_time: request_time_ts,
             response_time: response_time_ts,
+            response_time_ms: log.response_time_ms.unwrap_or(0),
+            ttfb_ms: 0,
+            upstream_latency_ms: 0,
+            local_postprocess_ms: 0,
+            cache_hit: false,
+            cached_tokens: 0,
+            upstream_oauth_account_key: None,
+            upstream_oauth_email: None,
+            upstream_oauth_account_id: None,
+            upstream_oauth_provider_type: None,
             created_at: created_at_str,
         }
     }

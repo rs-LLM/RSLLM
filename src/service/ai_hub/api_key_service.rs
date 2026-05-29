@@ -9,14 +9,38 @@ use crate::domain::table::basic::SysUser;
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::pool;
 use rbatis::rbdc::DateTime;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+
+const API_KEY_VALIDATION_CACHE_TTL: Duration = Duration::from_secs(30);
+
+#[derive(Clone)]
+struct CachedApiKeyValidation {
+    expires_at: Instant,
+    result: ApiKeyValidationResult,
+}
 
 /// API密钥管理服务
 ///
 /// 负责API密钥的创建、验证、查询和管理
 #[derive(Clone)]
-pub struct ApiKeyService {}
+pub struct ApiKeyService {
+    validation_cache: Arc<RwLock<HashMap<String, CachedApiKeyValidation>>>,
+}
 
 impl ApiKeyService {
+    pub fn new() -> Self {
+        Self {
+            validation_cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn invalidate_validation_cache(&self) {
+        self.validation_cache.write().await.clear();
+    }
+
     /// 创建新的API密钥
     pub async fn create_api_key(
         &self,
@@ -81,6 +105,7 @@ impl ApiKeyService {
             })?;
 
         ApiKey::insert(pool!(), &api_key).await?;
+        self.invalidate_validation_cache().await;
 
         Ok(ApiKeyResponse {
             id,
@@ -118,57 +143,71 @@ impl ApiKeyService {
         }
 
         let key_hash = ApiKey::hash_key(api_key);
-        let keys = ApiKey::select_by_map(pool!(), rbs::value! { "key_hash": key_hash }).await?;
+        if let Some(cached) = self.validation_cache.read().await.get(&key_hash).cloned()
+            && cached.expires_at > Instant::now()
+        {
+            return Ok(cached.result);
+        }
 
-        if keys.is_empty() {
-            return Ok(ApiKeyValidationResult {
+        let keys = ApiKey::select_by_map(pool!(), rbs::value! { "key_hash": &key_hash }).await?;
+
+        let result = if keys.is_empty() {
+            ApiKeyValidationResult {
                 valid: false,
                 api_key_id: None,
                 user_id: None,
                 user_level: None,
                 error: Some("API key not found".to_string()),
-            });
-        }
+            }
+        } else {
+            let key = &keys[0];
 
-        let key = &keys[0];
+            if key.enabled != Some(true) {
+                ApiKeyValidationResult {
+                    valid: false,
+                    api_key_id: key.id.clone(),
+                    user_id: Some(key.user_id.clone()),
+                    user_level: None,
+                    error: Some("API key is disabled".to_string()),
+                }
+            } else if key.status.as_deref() != Some("active") {
+                ApiKeyValidationResult {
+                    valid: false,
+                    api_key_id: key.id.clone(),
+                    user_id: Some(key.user_id.clone()),
+                    user_level: None,
+                    error: Some(format!("API key status is: {:?}", key.status)),
+                }
+            } else {
+                let user = SysUser::select_by_map(pool!(), rbs::value! { "id": &key.user_id })
+                    .await?
+                    .first()
+                    .cloned()
+                    .ok_or_else(|| ApplicationError::NotFound {
+                        message: format!("User {} not found", key.user_id),
+                        resource: Some("user".to_string()),
+                        id: Some(key.user_id.clone()),
+                    })?;
 
-        if key.enabled != Some(true) {
-            return Ok(ApiKeyValidationResult {
-                valid: false,
-                api_key_id: key.id.clone(),
-                user_id: Some(key.user_id.clone()),
-                user_level: None,
-                error: Some("API key is disabled".to_string()),
-            });
-        }
+                ApiKeyValidationResult {
+                    valid: true,
+                    api_key_id: key.id.clone(),
+                    user_id: Some(key.user_id.clone()),
+                    user_level: user.user_level,
+                    error: None,
+                }
+            }
+        };
 
-        if key.status.as_deref() != Some("active") {
-            return Ok(ApiKeyValidationResult {
-                valid: false,
-                api_key_id: key.id.clone(),
-                user_id: Some(key.user_id.clone()),
-                user_level: None,
-                error: Some(format!("API key status is: {:?}", key.status)),
-            });
-        }
+        self.validation_cache.write().await.insert(
+            key_hash,
+            CachedApiKeyValidation {
+                expires_at: Instant::now() + API_KEY_VALIDATION_CACHE_TTL,
+                result: result.clone(),
+            },
+        );
 
-        let user = SysUser::select_by_map(pool!(), rbs::value! { "id": &key.user_id })
-            .await?
-            .first()
-            .cloned()
-            .ok_or_else(|| ApplicationError::NotFound {
-                message: format!("User {} not found", key.user_id),
-                resource: Some("user".to_string()),
-                id: Some(key.user_id.clone()),
-            })?;
-
-        Ok(ApiKeyValidationResult {
-            valid: true,
-            api_key_id: key.id.clone(),
-            user_id: Some(key.user_id.clone()),
-            user_level: user.user_level,
-            error: None,
-        })
+        Ok(result)
     }
 
     /// 更新API密钥
@@ -214,6 +253,7 @@ impl ApiKeyService {
         };
 
         ApiKey::update_by_map(pool!(), &updated_key, rbs::value! { "id": id }).await?;
+        self.invalidate_validation_cache().await;
 
         Ok(ApiKeyResponse {
             id: updated_key
@@ -244,6 +284,7 @@ impl ApiKeyService {
     /// 删除API密钥
     pub async fn delete_api_key(&self, id: &str) -> ApplicationResult<()> {
         ApiKey::delete_by_map(pool!(), rbs::value! { "id": id }).await?;
+        self.invalidate_validation_cache().await;
 
         Ok(())
     }

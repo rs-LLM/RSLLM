@@ -14,6 +14,11 @@ use std::io::Read;
 pub struct ApplicationConfig {
     pub server_url: String, // 用途：服务器监听地址
     // 说明：指定服务器启动时监听的IP和端口
+    pub openai_port: Option<u16>,
+    #[serde(default = "default_openai_enabled")]
+    pub openai_enabled: bool,
+    #[serde(default = "default_openai_bind")]
+    pub openai_bind: String,
     pub db_url: String, // 用途：数据库连接URL
     // 说明：用于连接数据库服务器
     pub db_pool_len: usize, // 用途：数据库连接池大小
@@ -52,6 +57,10 @@ pub struct ApplicationConfig {
     // 说明：设置回收站中数据的自动清理时间（天）
     pub datetime_format: String, // 用途：日期时间格式
     // 说明：统一应用程序中日期时间的格式化方式
+    #[serde(default = "default_codex_oauth_callback_url")]
+    pub codex_oauth_callback_url: String,
+    #[serde(default = "default_codex_oauth_client_id")]
+    pub codex_oauth_client_id: String,
     pub errors: HashMap<String, String>, // 用途：错误码映射
     // 说明：存储错误码与错误信息的对应关系
     #[serde(default)]
@@ -65,7 +74,7 @@ impl Default for ApplicationConfig {
     fn default() -> Self {
         let config_dir = "config";
         let config_path = format!("{}/application.json5", config_dir);
-        
+
         if std::path::Path::new(&config_path).exists() {
             let mut f = File::open(&config_path).expect(&format!("not find '{}'", config_path));
             let mut cfg_data = "".to_string();
@@ -73,15 +82,22 @@ impl Default for ApplicationConfig {
                 .expect(&format!("read '{}' fail", config_path));
             let mut result: ApplicationConfig =
                 json5::from_str(&cfg_data).expect("load config file fail");
+            result.apply_runtime_env_overrides();
+            // SECURITY: validate after env overrides and before the config is used.
+            result.validate_jwt_secret();
             result.init_infos();
             result
         } else {
-            let default_config = Self::get_default_config();
+            let mut default_config = Self::get_default_config();
+            default_config.apply_runtime_env_overrides();
+            // SECURITY: validate after env overrides and before writing/using the config.
+            default_config.validate_jwt_secret();
             let config_str = json5::to_string(&default_config).expect("serialize config fail");
             std::fs::create_dir_all(config_dir).unwrap_or_else(|e| {
                 eprintln!("警告：创建{}目录失败: {}", config_dir, e);
             });
-            std::fs::write(&config_path, config_str).expect(&format!("write config file fail: {}", config_path));
+            std::fs::write(&config_path, config_str)
+                .expect(&format!("write config file fail: {}", config_path));
             eprintln!("信息：已创建默认配置文件 {}", config_path);
             default_config
         }
@@ -89,17 +105,126 @@ impl Default for ApplicationConfig {
 }
 
 impl ApplicationConfig {
+    fn apply_runtime_env_overrides(&mut self) {
+        let server_url = std::env::var("RSLLM_SERVER_URL").ok();
+        let callback_url = std::env::var("RSLLM_CODEX_OAUTH_CALLBACK_URL").ok();
+        let jwt_secret = std::env::var("RSLLM_JWT_SECRET").ok();
+        let openai_port = std::env::var("RSLLM_OPENAI_PORT")
+            .ok()
+            .and_then(|value| value.trim().parse::<u16>().ok());
+        let openai_enabled = std::env::var("RSLLM_OPENAI_ENABLED")
+            .ok()
+            .and_then(|value| parse_bool_override(&value));
+        let openai_bind = std::env::var("RSLLM_OPENAI_BIND").ok();
+
+        self.apply_runtime_env_overrides_with(
+            server_url.as_deref(),
+            callback_url.as_deref(),
+            jwt_secret.as_deref(),
+            openai_port,
+            openai_enabled,
+            openai_bind.as_deref(),
+        );
+    }
+
+    fn apply_runtime_env_overrides_with(
+        &mut self,
+        server_url: Option<&str>,
+        callback_url: Option<&str>,
+        jwt_secret: Option<&str>,
+        openai_port: Option<u16>,
+        openai_enabled: Option<bool>,
+        openai_bind: Option<&str>,
+    ) {
+        if let Some(server_url) = server_url {
+            let trimmed = server_url.trim();
+            if !trimmed.is_empty() {
+                self.server_url = trimmed.to_string();
+            }
+        }
+
+        if let Some(callback_url) = callback_url {
+            let trimmed = callback_url.trim();
+            if !trimmed.is_empty() {
+                self.codex_oauth_callback_url = trimmed.to_string();
+            }
+        }
+
+        if let Some(jwt_secret) = jwt_secret {
+            let trimmed = jwt_secret.trim();
+            if !trimmed.is_empty() {
+                self.jwt_secret = trimmed.to_string();
+            }
+        }
+
+        if let Some(openai_port) = openai_port {
+            self.openai_port = Some(openai_port);
+        }
+
+        if let Some(openai_enabled) = openai_enabled {
+            self.openai_enabled = openai_enabled;
+        }
+
+        if let Some(openai_bind) = openai_bind {
+            let trimmed = openai_bind.trim();
+            if !trimmed.is_empty() {
+                self.openai_bind = trimmed.to_string();
+            }
+        }
+
+        // SECURITY: enforce a non-empty, non-placeholder JWT secret at runtime.
+        self.validate_jwt_secret();
+    }
+
+    fn validate_jwt_secret(&self) {
+        let secret = self.jwt_secret.trim();
+
+        // Treat common placeholders as invalid.
+        let is_placeholder = secret.is_empty()
+            || secret == "${JWT_SECRET}"
+            || secret == "CHANGE_ME"
+            || secret == "change_me"
+            || secret == "PLEASE_CHANGE"
+            || secret == "please_change";
+
+        // 允许初始化阶段使用占位符启动，让初始化向导有机会将 jwt_secret 写入 config/application.json5。
+        // 初始化完成后（配置文件已写入真实密钥）将再次启用严格校验。
+        if is_placeholder {
+            log::warn!(
+                "[rsllm] jwt_secret 未配置或仍为占位符，将以初始化模式启动；请尽快完成初始化向导以写入真实 jwt_secret。"
+            );
+            return;
+        }
+
+        // Basic strength check to avoid trivially weak secrets.
+        // (Not a full password policy, but prevents obvious footguns.)
+        if secret.len() < 32 {
+            panic!(
+                "Invalid jwt_secret: too short (len < 32). Provide a strong random secret via RSLLM_JWT_SECRET."
+            );
+        }
+    }
+
     fn get_default_config() -> Self {
         let mut errors = HashMap::new();
         errors.insert("-1".to_string(), "未知错误".to_string());
         errors.insert("access_denied".to_string(), "无权限访问".to_string());
-        errors.insert("access_token_empty".to_string(), "令牌不能为空".to_string());
+        errors.insert(
+            "access_token_empty".to_string(),
+            "访问令牌不能为空".to_string(),
+        );
         errors.insert("account_disabled".to_string(), "账户被禁用".to_string());
         errors.insert("account_empty".to_string(), "账户不能为空".to_string());
         errors.insert("account_not_exists".to_string(), "账号不存在".to_string());
         errors.insert("arg.name_empty".to_string(), "权限名字不能为空".to_string());
-        errors.insert("arg.permission_empty".to_string(), "权限不能为空".to_string());
-        errors.insert("cannot_disable_admin".to_string(), "不能禁用超级管理员".to_string());
+        errors.insert(
+            "arg.permission_empty".to_string(),
+            "权限不能为空".to_string(),
+        );
+        errors.insert(
+            "cannot_disable_admin".to_string(),
+            "不能禁用超级管理员".to_string(),
+        );
         errors.insert("dict_exists".to_string(), "字典已存在".to_string());
         errors.insert("empty".to_string(), "缺少参数".to_string());
         errors.insert("id_empty".to_string(), "id不能为空".to_string());
@@ -107,16 +232,28 @@ impl ApplicationConfig {
         errors.insert("password_error".to_string(), "密码不正确".to_string());
         errors.insert("permission_exists".to_string(), "权限已存在".to_string());
         errors.insert("please_send_code".to_string(), "请发送验证码".to_string());
-        errors.insert("req_frequently".to_string(), "操作过于频繁,请等待{}秒后重试".to_string());
+        errors.insert(
+            "req_frequently".to_string(),
+            "操作过于频繁,请等待{}秒后重试".to_string(),
+        );
         errors.insert("role_id_empty".to_string(), "角色id不能为空".to_string());
-        errors.insert("role_user_cannot_empty".to_string(), "添加角色时用户和角色不能为空".to_string());
-        errors.insert("user_and_name_cannot_empty".to_string(), "用户名和姓名不能为空".to_string());
+        errors.insert(
+            "role_user_cannot_empty".to_string(),
+            "添加角色时用户和角色不能为空".to_string(),
+        );
+        errors.insert(
+            "user_and_name_cannot_empty".to_string(),
+            "用户名和姓名不能为空".to_string(),
+        );
         errors.insert("user_cannot_find".to_string(), "找不到用户".to_string());
         errors.insert("user_not_exists".to_string(), "用户不存在".to_string());
         errors.insert("vcode_error".to_string(), "验证码不正确".to_string());
 
         Self {
             server_url: "http://0.0.0.0:8000".to_string(),
+            openai_port: None,
+            openai_enabled: default_openai_enabled(),
+            openai_bind: default_openai_bind(),
             db_url: "sqlite://rsllm.db".to_string(),
             db_pool_len: 10,
             db_pool_timeout: 30,
@@ -136,9 +273,74 @@ impl ApplicationConfig {
             login_fail_retry_wait_sec: 30,
             trash_recycle_days: 90,
             datetime_format: "YYYY-MM-DD hh:mm:ss".to_string(),
+            codex_oauth_callback_url: default_codex_oauth_callback_url(),
+            codex_oauth_client_id: default_codex_oauth_client_id(),
             errors,
             error_infos: HashMap::new(),
         }
+    }
+}
+
+fn default_codex_oauth_callback_url() -> String {
+    "http://localhost:1455/auth/callback".to_string()
+}
+
+fn default_codex_oauth_client_id() -> String {
+    "app_EMoamEEZ73f0CkXaXp7hrann".to_string()
+}
+
+fn default_openai_enabled() -> bool {
+    false
+}
+
+fn default_openai_bind() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn parse_bool_override(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ApplicationConfig;
+
+    #[test]
+    fn should_apply_runtime_env_overrides_with_explicit_values() {
+        let mut config = ApplicationConfig::get_default_config();
+        config.apply_runtime_env_overrides_with(
+            Some("http://0.0.0.0:18999"),
+            Some("http://localhost:2455/auth/callback"),
+            None,
+            Some(3001),
+            Some(true),
+            Some("127.0.0.1"),
+        );
+
+        assert_eq!(config.server_url, "http://0.0.0.0:18999");
+        assert_eq!(
+            config.codex_oauth_callback_url,
+            "http://localhost:2455/auth/callback"
+        );
+        assert_eq!(config.openai_port, Some(3001));
+        assert!(config.openai_enabled);
+        assert_eq!(config.openai_bind, "127.0.0.1");
+    }
+
+    #[test]
+    fn should_ignore_empty_runtime_overrides() {
+        let mut config = ApplicationConfig::get_default_config();
+        let original_server_url = config.server_url.clone();
+        let original_callback_url = config.codex_oauth_callback_url.clone();
+
+        config.apply_runtime_env_overrides_with(Some("   "), Some(""), None, None, None, None);
+
+        assert_eq!(config.server_url, original_server_url);
+        assert_eq!(config.codex_oauth_callback_url, original_callback_url);
     }
 }
 

@@ -8,6 +8,7 @@ use axum::{
 use std::sync::Arc;
 
 use crate::context::ServiceContext;
+use crate::middleware::auth_axum::TOKEN_KEY;
 use crate::service::ai_hub::{RateLimitCheckResult, UserLevelModelRateLimitService};
 
 const API_KEY_HEADER: &str = "X-API-Key";
@@ -338,7 +339,7 @@ fn extract_model_key(request: &Request) -> Option<String> {
 }
 
 fn get_api_key(h: &HeaderMap) -> Option<&str> {
-    h.get("authorization")
+    h.get(TOKEN_KEY)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
         .or_else(|| h.get(API_KEY_HEADER).and_then(|v| v.to_str().ok()))

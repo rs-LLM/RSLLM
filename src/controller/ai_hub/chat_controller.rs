@@ -3,7 +3,7 @@
 //! 提供OpenAI兼容的聊天补全API接口
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::State,
     http::HeaderMap,
     response::{
@@ -19,29 +19,43 @@ use ulid::Ulid;
 
 // 导入相关类型
 use crate::context::ServiceContext;
-use crate::domain::dto::ai_hub::streaming::{ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta};
+use crate::domain::dto::ai_hub::streaming::{
+    ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta,
+};
 use crate::domain::dto::ai_hub::validation::ChatCompletionRequestParams;
 use crate::domain::dto::chat::ChatCompletionRequest;
 use crate::domain::dto::content::{
     ChatCompletionMessage, ChatMessageContent, ChatMessageContentPart,
 };
+use crate::domain::dto::provider::{ProviderConfig as ProviderConfigDTO, ProviderType};
 use crate::domain::dto::validation::Validator;
-use crate::domain::table::ai_hub::model_base::ModelBase;
 use crate::domain::table::ai_hub::model_provider_mapping::ModelProviderMapping;
+use crate::domain::vo::ai_hub::responses::OpenAIErrorResponse;
 use crate::domain::vo::chat::ChatCompletion;
 use crate::domain::vo::chat::ChatCompletionChoice;
-use crate::domain::vo::response::ApiResponse;
 use crate::domain::vo::usage::Usage;
+use crate::router::model_router::ModelRoutingInfo;
 use crate::service::BillingService;
 use crate::service::CalculatedFee;
+use crate::service::ai_hub::ProviderConfigService;
 use crate::service::ai_hub::rate_limit_service::RateLimitCheckResult;
+use crate::service::ai_hub::{AiRequestContext, resolve_request_identity};
 use crate::service::{Content, TokenCountMeta, TokenCounter};
+
+pub fn create_openai_error_response(
+    status: axum::http::StatusCode,
+    error_message: impl Into<String>,
+) -> Response {
+    let mut response =
+        Json(OpenAIErrorResponse::new(status.as_u16(), error_message)).into_response();
+    *response.status_mut() = status;
+    response
+}
 
 /// 创建SSE错误响应
 fn create_sse_error_response(error_message: String) -> Response {
-    let error_response = ApiResponse::<()>::error("500", &error_message);
     let error_event = Event::default()
-        .json_data(&error_response)
+        .json_data(OpenAIErrorResponse::new(500, error_message))
         .unwrap_or_else(|_| Event::default().data("Unknown error"));
     let stream = futures::stream::once(async move { Ok::<Event, Infallible>(error_event) });
     Sse::new(Box::pin(stream)).into_response()
@@ -51,20 +65,32 @@ fn create_sse_error_response(error_message: String) -> Response {
 async fn handle_non_streaming_response(
     req: ChatCompletionRequest,
     user_id: String,
-    api_key: String,
+    _api_key: String,
     fee: CalculatedFee,
     _request_id: String,
     usage_log_id: String,
+    provider_config: ProviderConfigDTO,
+    model_info: ModelRoutingInfo,
+    ip_address: Option<String>,
+    user_agent: Option<String>,
     state: Arc<ServiceContext>,
 ) -> Response {
     let billing_service = &state.billing_service;
     let rate_limit_service = state.rate_limit_service.clone();
-    let model_router = state.model_router.clone();
 
     let start_time = std::time::Instant::now();
 
     // 调用AI服务
-    let response = match call_provider(&state, &req, &user_id).await {
+    let response = match call_provider_with_fallback(
+        &state,
+        &req,
+        &user_id,
+        &provider_config,
+        &model_info,
+        &usage_log_id,
+    )
+    .await
+    {
         Ok(resp) => resp,
         Err(e) => {
             // 调用失败，回滚预消费
@@ -78,39 +104,11 @@ async fn handle_non_streaming_response(
                     rollback_err
                 );
             }
-            
-            // 返回符合OpenAI规范的错误响应
-            let error_response = crate::domain::vo::ai_hub::chat::ChatCompletion {
-                id: ulid::Ulid::new().to_string(),
-                object: Some("chat.completion".to_string()),
-                created: Some(std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()),
-                model: req.model.clone(),
-                choices: vec![crate::domain::vo::ai_hub::chat::ChatCompletionChoice {
-                    index: 0,
-                    message: crate::domain::dto::ai_hub::content::ChatCompletionMessage {
-                        role: "assistant".to_string(),
-                        content: Some(crate::domain::dto::ai_hub::content::ChatMessageContent::String(format!("Error: {}", e))),
-                        name: None,
-                        tool_calls: None,
-                        tool_call_id: None,
-                        refusal: None,
-                        reasoning_content: None,
-                        extra_fields: serde_json::Value::default(),
-                    },
-                    finish_reason: Some("error".to_string()),
-                    logprobs: None,
-                }],
-                usage: crate::domain::vo::ai_hub::usage::Usage {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                },
-                system_fingerprint: None,
-            };
-            return Json(error_response).into_response();
+
+            return create_openai_error_response(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("AI 服务调用失败: {}", e),
+            );
         }
     };
 
@@ -134,34 +132,24 @@ async fn handle_non_streaming_response(
                 };
 
                 if !content_str.is_empty() {
-                    match model_router.route_to_model(&req.model).await {
-                        Ok(model_def) => {
-                            match TokenCounter::count_content_tokens(
-                                &Content::Text(content_str),
-                                &req.model,
-                                true,
-                                Some(&model_def),
-                            ) {
-                                Ok(meta) => {
-                                    log::info!(
-                                        "[AI Hub] Non-streaming content token count result: output_tokens={}, input_tokens={}, total_tokens={}",
-                                        meta.output_tokens,
-                                        meta.input_tokens,
-                                        meta.total_tokens
-                                    );
-                                    total_output_tokens += meta.output_tokens;
-                                }
-                                Err(e) => {
-                                    log::warn!(
-                                        "[AI Hub] Failed to count non-streaming content tokens: {}",
-                                        e
-                                    );
-                                }
-                            }
+                    match TokenCounter::count_content_tokens(
+                        &Content::Text(content_str),
+                        &req.model,
+                        true,
+                        Some(&model_info),
+                    ) {
+                        Ok(meta) => {
+                            log::info!(
+                                "[AI Hub] Non-streaming content token count result: output_tokens={}, input_tokens={}, total_tokens={}",
+                                meta.output_tokens,
+                                meta.input_tokens,
+                                meta.total_tokens
+                            );
+                            total_output_tokens += meta.output_tokens;
                         }
                         Err(e) => {
                             log::warn!(
-                                "[AI Hub] Failed to get model definition for non-streaming content: {}",
+                                "[AI Hub] Failed to count non-streaming content tokens: {}",
                                 e
                             );
                         }
@@ -172,34 +160,24 @@ async fn handle_non_streaming_response(
             // 计算推理内容的 token
             if let Some(reasoning_content) = &choice.message.reasoning_content {
                 if !reasoning_content.is_empty() {
-                    match model_router.route_to_model(&req.model).await {
-                        Ok(model_def) => {
-                            match TokenCounter::count_content_tokens(
-                                &Content::Text(reasoning_content.clone()),
-                                &req.model,
-                                true,
-                                Some(&model_def),
-                            ) {
-                                Ok(meta) => {
-                                    log::info!(
-                                        "[AI Hub] Non-streaming reasoning content token count result: output_tokens={}, input_tokens={}, total_tokens={}",
-                                        meta.output_tokens,
-                                        meta.input_tokens,
-                                        meta.total_tokens
-                                    );
-                                    total_output_tokens += meta.output_tokens;
-                                }
-                                Err(e) => {
-                                    log::warn!(
-                                        "[AI Hub] Failed to count non-streaming reasoning content tokens: {}",
-                                        e
-                                    );
-                                }
-                            }
+                    match TokenCounter::count_content_tokens(
+                        &Content::Text(reasoning_content.clone()),
+                        &req.model,
+                        true,
+                        Some(&model_info),
+                    ) {
+                        Ok(meta) => {
+                            log::info!(
+                                "[AI Hub] Non-streaming reasoning content token count result: output_tokens={}, input_tokens={}, total_tokens={}",
+                                meta.output_tokens,
+                                meta.input_tokens,
+                                meta.total_tokens
+                            );
+                            total_output_tokens += meta.output_tokens;
                         }
                         Err(e) => {
                             log::warn!(
-                                "[AI Hub] Failed to get model definition for non-streaming reasoning content: {}",
+                                "[AI Hub] Failed to count non-streaming reasoning content tokens: {}",
                                 e
                             );
                         }
@@ -217,7 +195,7 @@ async fn handle_non_streaming_response(
 
     // 消耗输出token到速率限制（每次请求都消耗 1 个 RPM 和 output_tokens 个 TPM）
     if let Err(e) = rate_limit_service
-        .consume_tokens(&user_id, output_tokens as i32)
+        .settle_output_tokens(&user_id, output_tokens as i32)
         .await
     {
         log::error!("[AI Hub] Failed to consume tokens: {}", e);
@@ -245,22 +223,70 @@ async fn handle_non_streaming_response(
     );
 
     // 创建完整的用量记录并扣减输出费用
-    if let Err(e) = billing_service
+    let upstream =
+        crate::service::ai_hub::provider::upstream_trace::get_upstream_oauth(&usage_log_id);
+
+    let extra = {
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "prompt_tokens".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(fee.input_tokens)),
+        );
+        obj.insert(
+            "completion_tokens".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(output_tokens)),
+        );
+        obj.insert(
+            "total_tokens".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                fee.input_tokens.saturating_add(output_tokens),
+            )),
+        );
+        if let Some(upstream) = &upstream {
+            obj.insert(
+                "upstream_oauth".to_string(),
+                serde_json::json!({
+                    "provider_id": upstream.provider_id,
+                    "provider_type": upstream.provider_type,
+                    "account_key": upstream.account_key,
+                    "account_id": upstream.account_id,
+                    "email": upstream.email,
+                }),
+            );
+        }
+        Some(serde_json::Value::Object(obj))
+    };
+
+    let meta = crate::service::ai_hub::UsageLogMeta::chat_completions(
+        ip_address.clone(),
+        user_agent.clone(),
+    );
+
+    let completed = billing_service
         .complete_usage_log(
+            &fee,
             &usage_log_id,
-            &user_id,
-            &req.model,
-            &api_key,
-            fee.input_tokens,
+            &meta,
             output_tokens,
-            fee.input_price,
-            fee.output_price,
             duration_ms,
-            None,
+            extra,
+            upstream.clone(),
         )
-        .await
-    {
+        .await;
+
+    if let Err(e) = completed {
         log::error!("[AI Hub] Failed to complete usage log: {}", e);
+    } else {
+        crate::service::ai_hub::provider::upstream_trace::remove_upstream_oauth(&usage_log_id);
+        if let Some(upstream) = upstream {
+            crate::service::ai_hub::provider::oauth::record_provider_token_usage(
+                &upstream.provider_id,
+                &upstream.provider_type,
+                &upstream.account_key,
+                fee.input_tokens,
+                output_tokens,
+            );
+        }
     }
 
     // 返回响应（余额已在 chat_completions 中预扣减）
@@ -271,15 +297,18 @@ async fn handle_non_streaming_response(
 async fn handle_streaming_response(
     req: ChatCompletionRequest,
     user_id: String,
-    api_key: String,
+    _api_key: String,
     fee: CalculatedFee,
     request_id: String,
     usage_log_id: String,
+    provider_config: ProviderConfigDTO,
+    model_info: ModelRoutingInfo,
+    ip_address: Option<String>,
+    user_agent: Option<String>,
     state: Arc<ServiceContext>,
 ) -> Response {
     let billing_service = state.billing_service.clone();
     let rate_limit_service = state.rate_limit_service.clone();
-    let model_router = state.model_router.clone();
 
     // 创建SSE流
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(100);
@@ -298,13 +327,15 @@ async fn handle_streaming_response(
             model: req.model.clone(),
             choices: vec![ChatCompletionChunkChoice {
                 index: 0,
-                delta: Some(crate::domain::dto::ai_hub::streaming::ChatCompletionChunkDelta {
-                    role: Some("assistant".to_string()),
-                    content: None,
-                    reasoning_content: None,
-                    tool_calls: None,
-                    extra_fields: serde_json::Value::default(),
-                }),
+                delta: Some(
+                    crate::domain::dto::ai_hub::streaming::ChatCompletionChunkDelta {
+                        role: Some("assistant".to_string()),
+                        content: None,
+                        reasoning_content: None,
+                        tool_calls: None,
+                        extra_fields: serde_json::Value::default(),
+                    },
+                ),
                 finish_reason: None,
                 logprobs: None,
                 extra_fields: serde_json::Value::default(),
@@ -318,7 +349,16 @@ async fn handle_streaming_response(
         }
 
         // 调用AI服务获取流式响应（支持降级）
-        let mut stream = match call_provider_stream_with_fallback(&state, &req, &user_id).await {
+        let mut stream = match call_provider_stream_with_fallback(
+            &state,
+            &req,
+            &user_id,
+            &provider_config,
+            &model_info,
+            &usage_log_id,
+        )
+        .await
+        {
             Ok(stream) => stream,
             Err(e) => {
                 log::error!("[AI Hub] Provider call failed: {}", e);
@@ -329,7 +369,7 @@ async fn handle_streaming_response(
                         rollback_err
                     );
                 }
-                
+
                 // 发送一个符合OpenAI规范的错误完成块
                 let error_chunk = ChatCompletionChunk {
                     id: request_id.clone(),
@@ -359,7 +399,7 @@ async fn handle_streaming_response(
                 if let Ok(event) = Event::default().json_data(&error_chunk) {
                     let _ = tx.send(Ok(event)).await;
                 }
-                
+
                 // 发送终止事件
                 let done_event = Event::default().data("[DONE]");
                 let _ = tx.send(Ok(done_event)).await;
@@ -392,7 +432,10 @@ async fn handle_streaming_response(
                     if let Some(choice) = chunk.choices.first() {
                         if choice.finish_reason.is_some() {
                             provider_sent_finish_reason = true;
-                            log::info!("[AI Hub] Provider sent finish_reason: {:?}", choice.finish_reason);
+                            log::info!(
+                                "[AI Hub] Provider sent finish_reason: {:?}",
+                                choice.finish_reason
+                            );
                         }
 
                         if let Some(delta) = &choice.delta {
@@ -410,9 +453,13 @@ async fn handle_streaming_response(
 
                     // 过滤掉空 choices 的 chunk（避免客户端显示"Empty assistant response"）
                     // 只保留有内容、有 finish_reason 或有重要 extra_fields 的 chunk
-                    let should_forward = !chunk.choices.is_empty() 
+                    let should_forward = !chunk.choices.is_empty()
                         || chunk.choices.iter().any(|c| c.finish_reason.is_some())
-                        || !chunk.extra_fields.is_null() && !chunk.extra_fields.as_object().map_or(true, |obj| obj.is_empty());
+                        || !chunk.extra_fields.is_null()
+                            && !chunk
+                                .extra_fields
+                                .as_object()
+                                .map_or(true, |obj| obj.is_empty());
 
                     if should_forward {
                         // 转换为SSE事件
@@ -420,7 +467,9 @@ async fn handle_streaming_response(
                             let _ = tx.send(Ok(event)).await;
                         }
                     } else {
-                        log::info!("[AI Hub] Skipping empty chunk: choices empty, no finish_reason, no extra_fields");
+                        log::info!(
+                            "[AI Hub] Skipping empty chunk: choices empty, no finish_reason, no extra_fields"
+                        );
                     }
                 }
                 Err(e) => {
@@ -445,30 +494,23 @@ async fn handle_streaming_response(
 
             // 计算普通内容的 token
             if !accumulated_content.is_empty() {
-                match model_router.route_to_model(&req.model).await {
-                    Ok(model_def) => {
-                        match TokenCounter::count_content_tokens(
-                            &Content::Text(accumulated_content),
-                            &req.model,
-                            true,
-                            Some(&model_def),
-                        ) {
-                            Ok(meta) => {
-                                log::info!(
-                                    "[AI Hub] Content token count result: output_tokens={}, input_tokens={}, total_tokens={}",
-                                    meta.output_tokens,
-                                    meta.input_tokens,
-                                    meta.total_tokens
-                                );
-                                total_output_tokens += meta.output_tokens;
-                            }
-                            Err(e) => {
-                                log::warn!("[AI Hub] Failed to count content tokens: {}", e);
-                            }
-                        }
+                match TokenCounter::count_content_tokens(
+                    &Content::Text(accumulated_content),
+                    &req.model,
+                    true,
+                    Some(&model_info),
+                ) {
+                    Ok(meta) => {
+                        log::info!(
+                            "[AI Hub] Content token count result: output_tokens={}, input_tokens={}, total_tokens={}",
+                            meta.output_tokens,
+                            meta.input_tokens,
+                            meta.total_tokens
+                        );
+                        total_output_tokens += meta.output_tokens;
                     }
                     Err(e) => {
-                        log::warn!("[AI Hub] Failed to get model definition for content: {}", e);
+                        log::warn!("[AI Hub] Failed to count content tokens: {}", e);
                     }
                 }
             } else {
@@ -477,36 +519,23 @@ async fn handle_streaming_response(
 
             // 计算推理内容的 token
             if !accumulated_reasoning_content.is_empty() {
-                match model_router.route_to_model(&req.model).await {
-                    Ok(model_def) => {
-                        match TokenCounter::count_content_tokens(
-                            &Content::Text(accumulated_reasoning_content),
-                            &req.model,
-                            true,
-                            Some(&model_def),
-                        ) {
-                            Ok(meta) => {
-                                log::info!(
-                                    "[AI Hub] Reasoning content token count result: output_tokens={}, input_tokens={}, total_tokens={}",
-                                    meta.output_tokens,
-                                    meta.input_tokens,
-                                    meta.total_tokens
-                                );
-                                total_output_tokens += meta.output_tokens;
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "[AI Hub] Failed to count reasoning content tokens: {}",
-                                    e
-                                );
-                            }
-                        }
+                match TokenCounter::count_content_tokens(
+                    &Content::Text(accumulated_reasoning_content),
+                    &req.model,
+                    true,
+                    Some(&model_info),
+                ) {
+                    Ok(meta) => {
+                        log::info!(
+                            "[AI Hub] Reasoning content token count result: output_tokens={}, input_tokens={}, total_tokens={}",
+                            meta.output_tokens,
+                            meta.input_tokens,
+                            meta.total_tokens
+                        );
+                        total_output_tokens += meta.output_tokens;
                     }
                     Err(e) => {
-                        log::warn!(
-                            "[AI Hub] Failed to get model definition for reasoning content: {}",
-                            e
-                        );
+                        log::warn!("[AI Hub] Failed to count reasoning content tokens: {}", e);
                     }
                 }
             } else {
@@ -522,7 +551,7 @@ async fn handle_streaming_response(
 
         // 消耗输出token到速率限制（每次请求都消耗 1 个 RPM 和 output_tokens 个 TPM）
         if let Err(e) = rate_limit_service
-            .consume_tokens(&user_id, output_tokens as i32)
+            .settle_output_tokens(&user_id, output_tokens as i32)
             .await
         {
             log::error!("[AI Hub] Failed to consume tokens: {}", e);
@@ -553,7 +582,10 @@ async fn handle_streaming_response(
                     extra_fields: serde_json::Value::default(),
                 }],
                 system_fingerprint: None,
-                extra_fields: provider_usage.as_ref().cloned().unwrap_or_else(|| serde_json::Value::default()),
+                extra_fields: provider_usage
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::default()),
             };
 
             if let Ok(event) = Event::default().json_data(&end_chunk) {
@@ -575,15 +607,20 @@ async fn handle_streaming_response(
         // 创建完整的用量记录并扣减输出费用
         let duration_ms = start_time.elapsed().as_millis() as i64;
 
+        let upstream =
+            crate::service::ai_hub::provider::upstream_trace::get_upstream_oauth(&usage_log_id);
+
         // 克隆provider_usage以便后续使用
         let provider_usage_clone = provider_usage.clone();
 
         // 确定使用的 token 数量：优先使用供应商返回的，否则使用自己计算的
         let (final_input_tokens, final_output_tokens) = if let Some(usage) = provider_usage_clone {
-            let prompt_tokens = usage.get("prompt_tokens")
+            let prompt_tokens = usage
+                .get("prompt_tokens")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(fee.input_tokens);
-            let completion_tokens = usage.get("completion_tokens")
+            let completion_tokens = usage
+                .get("completion_tokens")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(output_tokens);
             log::info!(
@@ -610,22 +647,64 @@ async fn handle_streaming_response(
             final_output_tokens
         );
 
-        if let Err(e) = billing_service
+        let provider_usage_with_upstream = if let Some(upstream) = &upstream {
+            if let Some(mut map) = provider_usage.clone().and_then(|v| v.as_object().cloned()) {
+                map.insert(
+                    "upstream_oauth".to_string(),
+                    serde_json::json!({
+                        "provider_id": upstream.provider_id,
+                        "provider_type": upstream.provider_type,
+                        "account_key": upstream.account_key,
+                        "account_id": upstream.account_id,
+                        "email": upstream.email,
+                    }),
+                );
+                Some(serde_json::Value::Object(map))
+            } else {
+                Some(serde_json::json!({
+                    "upstream_oauth": {
+                        "provider_id": upstream.provider_id,
+                        "provider_type": upstream.provider_type,
+                        "account_key": upstream.account_key,
+                        "account_id": upstream.account_id,
+                        "email": upstream.email,
+                    }
+                }))
+            }
+        } else {
+            provider_usage.clone()
+        };
+
+        let meta = crate::service::ai_hub::UsageLogMeta::chat_completions(
+            ip_address.clone(),
+            user_agent.clone(),
+        );
+
+        let completed = billing_service
             .complete_usage_log(
+                &fee,
                 &usage_log_id,
-                &user_id,
-                &req.model,
-                &api_key,
-                final_input_tokens,
+                &meta,
                 final_output_tokens,
-                fee.input_price,
-                fee.output_price,
                 duration_ms,
-                provider_usage.clone(),
+                provider_usage_with_upstream.clone(),
+                upstream.clone(),
             )
-            .await
-        {
+            .await;
+
+        if let Err(e) = completed {
             log::error!("[AI Hub] Failed to complete usage log: {}", e);
+        } else {
+            crate::service::ai_hub::provider::upstream_trace::remove_upstream_oauth(&usage_log_id);
+            if let Some(upstream) = &upstream {
+                crate::service::ai_hub::provider::oauth::record_provider_token_usage(
+                    &upstream.provider_id,
+                    &upstream.provider_type,
+                    &upstream.account_key,
+                    final_input_tokens,
+                    final_output_tokens,
+                );
+            }
         }
     });
 
@@ -648,9 +727,10 @@ async fn handle_streaming_response(
     request_body = ChatCompletionRequest,
     responses(
         (status = 200, description = "聊天补全成功", body = ChatCompletion),
-        (status = 400, description = "参数错误", body = ApiResponse<ChatCompletion>),
-        (status = 401, description = "未授权", body = ApiResponse<ChatCompletion>),
-        (status = 500, description = "服务器错误", body = ApiResponse<ChatCompletion>)
+        (status = 400, description = "参数错误", body = OpenAIErrorResponse),
+        (status = 401, description = "未授权", body = OpenAIErrorResponse),
+        (status = 429, description = "请求过多", body = OpenAIErrorResponse),
+        (status = 500, description = "服务器错误", body = OpenAIErrorResponse)
     ),
     tag = "chat",
     security(
@@ -661,6 +741,7 @@ async fn handle_streaming_response(
 pub async fn chat_completions(
     headers: HeaderMap,
     State(state): State<Arc<ServiceContext>>,
+    request_context: Option<Extension<AiRequestContext>>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Response {
     let request_id = Ulid::new().to_string();
@@ -669,13 +750,19 @@ pub async fn chat_completions(
     log::info!("[AI Hub] Chat completion request: {}", request_id);
 
     // 1. 用户认证并获取API密钥
-    let (user_id, api_key) = match authenticate_user(&headers, &state).await {
+    let (user_id, api_key) = match authenticate_user(
+        &headers,
+        &state,
+        request_context.as_ref().map(|context| &context.0),
+    )
+    .await
+    {
         Ok((id, key)) => (id, key),
         Err(e) => {
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(e);
             } else {
-                return Json(ApiResponse::<()>::error("401", &e)).into_response();
+                return create_openai_error_response(axum::http::StatusCode::UNAUTHORIZED, e);
             }
         }
     };
@@ -691,7 +778,10 @@ pub async fn chat_completions(
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(error_msg);
             } else {
-                return Json(ApiResponse::<()>::error("500", &error_msg)).into_response();
+                return create_openai_error_response(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    &error_msg,
+                );
             }
         }
     };
@@ -726,7 +816,7 @@ pub async fn chat_completions(
         presence_penalty: req.presence_penalty,
         n: req.n,
     };
-    
+
     match Validator::validate_chat_completion_request(&params) {
         Ok(_) => log::info!("[AI Hub] Basic validation passed"),
         Err(e) => {
@@ -735,7 +825,10 @@ pub async fn chat_completions(
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(error_msg);
             } else {
-                return Json(ApiResponse::<()>::error("400", &error_msg)).into_response();
+                return create_openai_error_response(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    &error_msg,
+                );
             }
         }
     }
@@ -748,19 +841,25 @@ pub async fn chat_completions(
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(error_msg);
             } else {
-                return Json(ApiResponse::<()>::error("400", &error_msg)).into_response();
+                return create_openai_error_response(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    &error_msg,
+                );
             }
         }
     }
 
     // 5. Token计算
-    let token_meta = match calculate_tokens(&req, &state.model_router).await {
+    let token_meta = match calculate_tokens(&req, &model_info).await {
         Ok(meta) => meta,
         Err(e) => {
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(e);
             } else {
-                return Json(ApiResponse::<()>::error("500", &e)).into_response();
+                return create_openai_error_response(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    &e,
+                );
             }
         }
     };
@@ -774,7 +873,7 @@ pub async fn chat_completions(
     let input_tokens_i32 = token_meta.input_tokens as i32;
     let rate_limit_result = state
         .rate_limit_service
-        .check_quota_with_tokens(&user_id, input_tokens_i32)
+        .precheck_request_tokens(&user_id, input_tokens_i32)
         .await;
     match rate_limit_result {
         Ok(RateLimitCheckResult {
@@ -810,7 +909,10 @@ pub async fn chat_completions(
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(error_msg);
             } else {
-                return Json(ApiResponse::<()>::error("429", &error_msg)).into_response();
+                return create_openai_error_response(
+                    axum::http::StatusCode::TOO_MANY_REQUESTS,
+                    &error_msg,
+                );
             }
         }
         Err(e) => {
@@ -819,7 +921,10 @@ pub async fn chat_completions(
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(error_msg);
             } else {
-                return Json(ApiResponse::<()>::error("500", &error_msg)).into_response();
+                return create_openai_error_response(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    &error_msg,
+                );
             }
         }
     }
@@ -837,8 +942,9 @@ pub async fn chat_completions(
         token_meta.input_tokens,
         estimated_output_tokens,
         billing_service,
-        &state.model_router,
         &api_key,
+        model_info.model_base.input_price,
+        model_info.model_base.output_price,
     )
     .await
     {
@@ -847,7 +953,10 @@ pub async fn chat_completions(
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(e);
             } else {
-                return Json(ApiResponse::<()>::error("500", &e)).into_response();
+                return create_openai_error_response(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    &e,
+                );
             }
         }
     };
@@ -858,12 +967,18 @@ pub async fn chat_completions(
     );
 
     // 4.5. 预扣减余额
-    let duration_ms = start_time.elapsed().as_millis() as i64;
+    let _duration_ms = start_time.elapsed().as_millis() as i64;
+    let (ip_address, user_agent) = crate::controller::ai_hub::extract_client_meta(&headers);
+
+    let meta = crate::service::ai_hub::UsageLogMeta::chat_completions(
+        ip_address.clone(),
+        user_agent.clone(),
+    );
+
     let _usage_log_id = match billing_service
         .pre_deduct_quota_and_log(
             &fee,
-            duration_ms,
-            "pending",
+            &meta,
             Some(serde_json::json!({
                 "model": req.model,
                 "stream": req.stream.unwrap_or(false),
@@ -877,7 +992,10 @@ pub async fn chat_completions(
             if req.stream.unwrap_or(false) {
                 return create_sse_error_response(error_msg);
             } else {
-                return Json(ApiResponse::<()>::error("500", &error_msg)).into_response();
+                return create_openai_error_response(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    &error_msg,
+                );
             }
         }
     };
@@ -894,50 +1012,50 @@ pub async fn chat_completions(
             fee,
             request_id,
             _usage_log_id.clone(),
+            provider_config.clone(),
+            model_info.clone(),
+            ip_address.clone(),
+            user_agent.clone(),
             state,
         )
         .await
     } else {
         // 非流式响应
-        handle_non_streaming_response(req, user_id, api_key, fee, request_id, _usage_log_id, state)
-            .await
+        handle_non_streaming_response(
+            req,
+            user_id,
+            api_key,
+            fee,
+            request_id,
+            _usage_log_id,
+            provider_config,
+            model_info,
+            ip_address,
+            user_agent,
+            state,
+        )
+        .await
     }
 }
 
 /// 用户认证（仅支持API key）
-async fn authenticate_user(
+pub async fn authenticate_user(
     headers: &HeaderMap,
     state: &Arc<ServiceContext>,
+    request_context: Option<&AiRequestContext>,
 ) -> std::result::Result<(String, String), String> {
-    let token = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .ok_or_else(|| "Missing or invalid authorization header".to_string())?;
+    let identity = resolve_request_identity(headers, state, request_context).await?;
+    Ok((identity.user_id, identity.api_key))
+}
 
-    let validation_result = state
-        .api_key_service
-        .validate_api_key(token)
-        .await
-        .map_err(|e| format!("API key validation failed: {}", e))?;
-
-    if !validation_result.valid {
-        return Err(validation_result
-            .error
-            .unwrap_or_else(|| "Invalid API key".to_string()));
-    }
-
-    let user_id = validation_result
-        .user_id
-        .ok_or_else(|| "User ID not found".to_string())?;
-
-    Ok((user_id, token.to_string()))
+pub fn extract_api_key(headers: &HeaderMap) -> std::result::Result<String, String> {
+    crate::service::ai_hub::extract_api_key(headers)
 }
 
 /// 计算token数量
-async fn calculate_tokens(
+pub async fn calculate_tokens(
     req: &ChatCompletionRequest,
-    model_router: &crate::routers::model_router::ModelRouter,
+    model_info: &ModelRoutingInfo,
 ) -> std::result::Result<TokenCountMeta, String> {
     log::info!(
         "[AI Hub] calculate_tokens called: model={}, messages_count={}",
@@ -946,18 +1064,6 @@ async fn calculate_tokens(
     );
 
     let mut total_meta = TokenCountMeta::default();
-
-    let model_def = match model_router.route_to_model(&req.model).await {
-        Ok(def) => def,
-        Err(e) => {
-            log::warn!(
-                "[AI Hub] Failed to get model definition for {}: {}",
-                req.model,
-                e
-            );
-            return Err(format!("Model not found: {}", req.model));
-        }
-    };
 
     let is_stream = req.stream.unwrap_or(false);
     log::info!(
@@ -1004,7 +1110,7 @@ async fn calculate_tokens(
                 &content_enum,
                 &req.model,
                 false,
-                Some(&model_def),
+                Some(model_info),
             )
             .map_err(|e| e.to_string())?;
 
@@ -1032,14 +1138,15 @@ async fn calculate_tokens(
 }
 
 /// 获取动态定价
-async fn get_dynamic_pricing(
+pub async fn get_dynamic_pricing(
     user_id: &str,
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
     billing_service: &BillingService,
-    model_router: &crate::routers::model_router::ModelRouter,
     api_key: &str,
+    base_input_price: f64,
+    base_output_price: f64,
 ) -> std::result::Result<CalculatedFee, String> {
     log::info!(
         "[AI Hub] get_dynamic_pricing called: user_id={}, model={}, input_tokens={}, output_tokens={}",
@@ -1049,31 +1156,12 @@ async fn get_dynamic_pricing(
         output_tokens
     );
 
-    let (base_input_price, base_output_price, _provider_id) = match model_router
-        .route_to_model(model)
-        .await
-    {
-        Ok(model_info) => {
-            log::info!(
-                "[AI Hub] Retrieved model pricing from database: {} - input: {:.6}, output: {:.6}",
-                model,
-                model_info.model_base.input_price,
-                model_info.model_base.output_price
-            );
-            (
-                model_info.model_base.input_price,
-                model_info.model_base.output_price,
-                model_info.provider.id.clone().unwrap_or_default(),
-            )
-        }
-        Err(e) => {
-            log::warn!(
-                "[AI Hub] Failed to get model definition from database: {}, using default pricing",
-                e
-            );
-            (1.0, 1.0, "unknown".to_string())
-        }
-    };
+    log::info!(
+        "[AI Hub] Using routed model pricing: {} - input: {:.6}, output: {:.6}",
+        model,
+        base_input_price,
+        base_output_price
+    );
 
     log::info!(
         "[AI Hub] Calling calculate_and_check: base_input_price={:.6}, base_output_price={:.6}",
@@ -1109,10 +1197,14 @@ async fn get_dynamic_pricing(
 
 /// 检测错误是否为429 Too Many Requests
 fn is_rate_limit_error(error: &str) -> bool {
-    error.contains("429") || 
-    error.contains("Too Many Requests") ||
-    error.contains("1302") ||
-    error.contains("并发数过高")
+    error.contains("429")
+        || error.contains("Too Many Requests")
+        || error.contains("1302")
+        || error.contains("并发数过高")
+}
+
+fn is_unauthorized_error(error: &str) -> bool {
+    error.contains("401") || error.contains("Unauthorized")
 }
 
 /// 获取模型的所有可用映射（按priority降序）
@@ -1127,10 +1219,13 @@ async fn get_all_mappings(
 }
 
 /// 调用AI Provider获取真实流式响应（支持降级）
-async fn call_provider_stream_with_fallback(
+pub async fn call_provider_stream_with_fallback(
     state: &Arc<ServiceContext>,
     req: &ChatCompletionRequest,
     _user_id: &str,
+    provider_config: &ProviderConfigDTO,
+    model_info: &ModelRoutingInfo,
+    trace_key: &str,
 ) -> std::result::Result<
     futures::stream::BoxStream<
         'static,
@@ -1138,26 +1233,11 @@ async fn call_provider_stream_with_fallback(
     >,
     String,
 > {
-    let model_router = &state.model_router;
-
-    let (provider_config, model_info) = model_router
-        .route(&req.model, true)
-        .await
-        .map_err(|e| format!("Failed to route model: {}", e))?;
-
-    let rb = crate::pool!();
-
-    let model_base = ModelBase::select_by_model_code(rb, &model_info.model_base.model_code)
-        .await
-        .map_err(|e| format!("Failed to query model_base: {}", e))?
-        .ok_or_else(|| {
-            format!(
-                "Model '{}' not found in model_base",
-                model_info.model_base.model_code
-            )
-        })?;
-
-    let model_id = model_base.id.ok_or_else(|| "Model ID not found".to_string())?;
+    let model_id = model_info
+        .model_base
+        .id
+        .clone()
+        .ok_or_else(|| "Model ID not found".to_string())?;
     let provider_id = provider_config.id.as_str();
 
     let mappings = get_all_mappings(&model_id, provider_id).await?;
@@ -1169,6 +1249,7 @@ async fn call_provider_stream_with_fallback(
     let mut last_error = String::new();
 
     for (index, mapping) in mappings.iter().enumerate() {
+        let mut retried_after_unauthorized = false;
         log::info!(
             "[AI Hub] Trying mapping {}/{}: provider_model_name={}, priority={:?}",
             index + 1,
@@ -1177,52 +1258,114 @@ async fn call_provider_stream_with_fallback(
             mapping.priority
         );
 
-        let provider_registry = state.provider_registry.read().await;
-
-        let provider = match provider_registry.get_provider(&provider_config.provider_code) {
-            Some(p) => p,
-            None => {
-                last_error = format!(
-                    "Provider not found for provider_code: {}",
-                    provider_config.provider_code
-                );
-                log::warn!("[AI Hub] {}", last_error);
-                continue;
+        if provider_config.provider_type == ProviderType::Codex {
+            if let Some(provider_config_service) =
+                state.provider_config_service.read().await.as_ref()
+            {
+                if let Err(e) = provider_config_service
+                    .get_provider_oauth_status(provider_id)
+                    .await
+                {
+                    log::warn!(
+                        "[AI Hub] Codex pre-refresh status check failed for provider {}: {}",
+                        provider_id,
+                        e
+                    );
+                }
             }
-        };
+        }
 
         let provider_req = convert_to_provider_request(req, &mapping.provider_model_name);
 
-        match provider
-            .chat_completions(provider_req, &serde_json::json!({}))
-            .await
-        {
-            Ok(response) => {
-                log::info!(
-                    "[AI Hub] Successfully called provider with mapping {}/{}",
-                    index + 1,
-                    mappings.len()
-                );
-                match response {
-                    crate::domain::dto::chat::ChatCompletionResponse::Stream(stream) => {
-                        return Ok(stream);
-                    }
-                    crate::domain::dto::chat::ChatCompletionResponse::NonStream(_) => {
-                        last_error = "Expected stream response but got non-stream response".to_string();
+        loop {
+            let provider = {
+                let provider_registry = state.provider_registry.read().await;
+                match provider_registry.get_provider(&provider_config.provider_code) {
+                    Some(p) => p,
+                    None => {
+                        last_error = format!(
+                            "Provider not found for provider_code: {}",
+                            provider_config.provider_code
+                        );
                         log::warn!("[AI Hub] {}", last_error);
-                        continue;
+                        break;
                     }
                 }
-            }
-            Err(e) => {
-                last_error = format!("Provider error: {}", e);
-                log::error!("[AI Hub] Mapping {}/{} failed: {}", index + 1, mappings.len(), last_error);
+            };
 
-                if is_rate_limit_error(&last_error) {
-                    log::info!("[AI Hub] Rate limit error detected, trying next mapping...");
-                    continue;
-                } else {
-                    return Err(last_error);
+            let model_config = serde_json::json!({
+                "rsllm": {
+                    "trace_key": trace_key,
+                    "provider_id": provider_id,
+                    "provider_type": provider_config.provider_type.to_string(),
+                }
+            });
+
+            match provider
+                .chat_completions(provider_req.clone(), &model_config)
+                .await
+            {
+                Ok(response) => {
+                    log::info!(
+                        "[AI Hub] Successfully called provider with mapping {}/{}",
+                        index + 1,
+                        mappings.len()
+                    );
+                    match response {
+                        crate::domain::dto::chat::ChatCompletionResponse::Stream(stream) => {
+                            return Ok(stream);
+                        }
+                        crate::domain::dto::chat::ChatCompletionResponse::NonStream(_) => {
+                            last_error =
+                                "Expected stream response but got non-stream response".to_string();
+                            log::warn!("[AI Hub] {}", last_error);
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => {
+                    last_error = format!("Provider error: {}", e);
+                    log::error!(
+                        "[AI Hub] Mapping {}/{} failed: {}",
+                        index + 1,
+                        mappings.len(),
+                        last_error
+                    );
+
+                    if provider_config.provider_type == ProviderType::Codex
+                        && !retried_after_unauthorized
+                        && is_unauthorized_error(&last_error)
+                    {
+                        retried_after_unauthorized = true;
+                        if let Some(provider_config_service) =
+                            state.provider_config_service.read().await.as_ref()
+                        {
+                            if let Err(refresh_err) = provider_config_service
+                                .get_provider_oauth_status(provider_id)
+                                .await
+                            {
+                                log::warn!(
+                                    "[AI Hub] Codex oauth status re-check failed for provider {}: {}",
+                                    provider_id,
+                                    refresh_err
+                                );
+                            } else {
+                                log::info!(
+                                    "[AI Hub] Codex oauth status re-checked, retrying mapping {}/{}",
+                                    index + 1,
+                                    mappings.len()
+                                );
+                            }
+                        }
+                        continue;
+                    }
+
+                    if is_rate_limit_error(&last_error) {
+                        log::info!("[AI Hub] Rate limit error detected, trying next mapping...");
+                        break;
+                    } else {
+                        return Err(last_error);
+                    }
                 }
             }
         }
@@ -1236,31 +1379,19 @@ async fn call_provider_stream_with_fallback(
 }
 
 /// 调用AI Provider获取真实响应（支持降级）
-async fn call_provider_with_fallback(
+pub async fn call_provider_with_fallback(
     state: &Arc<ServiceContext>,
     req: &ChatCompletionRequest,
     _user_id: &str,
+    provider_config: &ProviderConfigDTO,
+    model_info: &ModelRoutingInfo,
+    trace_key: &str,
 ) -> std::result::Result<ChatCompletion, String> {
-    let model_router = &state.model_router;
-
-    let (provider_config, model_info) = model_router
-        .route(&req.model, true)
-        .await
-        .map_err(|e| format!("Failed to route model: {}", e))?;
-
-    let rb = crate::pool!();
-
-    let model_base = ModelBase::select_by_model_code(rb, &model_info.model_base.model_code)
-        .await
-        .map_err(|e| format!("Failed to query model_base: {}", e))?
-        .ok_or_else(|| {
-            format!(
-                "Model '{}' not found in model_base",
-                model_info.model_base.model_code
-            )
-        })?;
-
-    let model_id = model_base.id.ok_or_else(|| "Model ID not found".to_string())?;
+    let model_id = model_info
+        .model_base
+        .id
+        .clone()
+        .ok_or_else(|| "Model ID not found".to_string())?;
     let provider_id = provider_config.id.as_str();
 
     let mappings = get_all_mappings(&model_id, provider_id).await?;
@@ -1272,6 +1403,7 @@ async fn call_provider_with_fallback(
     let mut last_error = String::new();
 
     for (index, mapping) in mappings.iter().enumerate() {
+        let mut retried_after_unauthorized = false;
         log::info!(
             "[AI Hub] Trying mapping {}/{}: provider_model_name={}, priority={:?}",
             index + 1,
@@ -1280,55 +1412,119 @@ async fn call_provider_with_fallback(
             mapping.priority
         );
 
-        let provider_registry = state.provider_registry.read().await;
-
-        let provider = match provider_registry.get_provider(&provider_config.provider_code) {
-            Some(p) => p,
-            None => {
-                last_error = format!(
-                    "Provider not found for provider_code: {}",
-                    provider_config.provider_code
-                );
-                log::warn!("[AI Hub] {}", last_error);
-                continue;
+        if provider_config.provider_type == ProviderType::Codex {
+            if let Some(provider_config_service) =
+                state.provider_config_service.read().await.as_ref()
+            {
+                if let Err(e) = provider_config_service
+                    .get_provider_oauth_status(provider_id)
+                    .await
+                {
+                    log::warn!(
+                        "[AI Hub] Codex pre-refresh status check failed for provider {}: {}",
+                        provider_id,
+                        e
+                    );
+                }
             }
-        };
+        }
 
         let provider_req = convert_to_provider_request(req, &mapping.provider_model_name);
 
-        match provider
-            .chat_completions(provider_req, &serde_json::json!({}))
-            .await
-        {
-            Ok(response) => {
-                log::info!(
-                    "[AI Hub] Successfully called provider with mapping {}/{}",
-                    index + 1,
-                    mappings.len()
-                );
-                match response {
-                    crate::domain::dto::chat::ChatCompletionResponse::NonStream(completion) => {
-                        return convert_from_provider_response(
-                            crate::domain::dto::chat::ChatCompletionResponse::NonStream(completion),
-                            &req.model,
+        loop {
+            let provider = {
+                let provider_registry = state.provider_registry.read().await;
+                match provider_registry.get_provider(&provider_config.provider_code) {
+                    Some(p) => p,
+                    None => {
+                        last_error = format!(
+                            "Provider not found for provider_code: {}",
+                            provider_config.provider_code
                         );
-                    }
-                    crate::domain::dto::chat::ChatCompletionResponse::Stream(_) => {
-                        last_error = "Expected non-stream response but got stream response".to_string();
                         log::warn!("[AI Hub] {}", last_error);
-                        continue;
+                        break;
                     }
                 }
-            }
-            Err(e) => {
-                last_error = format!("Provider error: {}", e);
-                log::error!("[AI Hub] Mapping {}/{} failed: {}", index + 1, mappings.len(), last_error);
+            };
 
-                if is_rate_limit_error(&last_error) {
-                    log::info!("[AI Hub] Rate limit error detected, trying next mapping...");
-                    continue;
-                } else {
-                    return Err(last_error);
+            let model_config = serde_json::json!({
+                "rsllm": {
+                    "trace_key": trace_key,
+                    "provider_id": provider_id,
+                    "provider_type": provider_config.provider_type.to_string(),
+                }
+            });
+
+            match provider
+                .chat_completions(provider_req.clone(), &model_config)
+                .await
+            {
+                Ok(response) => {
+                    log::info!(
+                        "[AI Hub] Successfully called provider with mapping {}/{}",
+                        index + 1,
+                        mappings.len()
+                    );
+                    match response {
+                        crate::domain::dto::chat::ChatCompletionResponse::NonStream(completion) => {
+                            return convert_from_provider_response(
+                                crate::domain::dto::chat::ChatCompletionResponse::NonStream(
+                                    completion,
+                                ),
+                                &req.model,
+                            );
+                        }
+                        crate::domain::dto::chat::ChatCompletionResponse::Stream(_) => {
+                            last_error =
+                                "Expected non-stream response but got stream response".to_string();
+                            log::warn!("[AI Hub] {}", last_error);
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => {
+                    last_error = format!("Provider error: {}", e);
+                    log::error!(
+                        "[AI Hub] Mapping {}/{} failed: {}",
+                        index + 1,
+                        mappings.len(),
+                        last_error
+                    );
+
+                    if provider_config.provider_type == ProviderType::Codex
+                        && !retried_after_unauthorized
+                        && is_unauthorized_error(&last_error)
+                    {
+                        retried_after_unauthorized = true;
+                        if let Some(provider_config_service) =
+                            state.provider_config_service.read().await.as_ref()
+                        {
+                            if let Err(refresh_err) = provider_config_service
+                                .get_provider_oauth_status(provider_id)
+                                .await
+                            {
+                                log::warn!(
+                                    "[AI Hub] Codex oauth status re-check failed for provider {}: {}",
+                                    provider_id,
+                                    refresh_err
+                                );
+                            } else {
+                                log::info!(
+                                    "[AI Hub] Codex oauth status re-checked, retrying mapping {}/{}",
+                                    index + 1,
+                                    mappings.len()
+                                );
+                            }
+                        }
+                        continue;
+                    }
+
+                    if is_rate_limit_error(&last_error) {
+                        log::info!("[AI Hub] Rate limit error detected, trying next mapping...");
+                        break;
+                    } else {
+                        return Err(last_error);
+                    }
                 }
             }
         }
@@ -1339,15 +1535,6 @@ async fn call_provider_with_fallback(
         mappings.len(),
         last_error
     ))
-}
-
-/// 调用AI Provider获取真实响应
-async fn call_provider(
-    state: &Arc<ServiceContext>,
-    req: &ChatCompletionRequest,
-    _user_id: &str,
-) -> std::result::Result<ChatCompletion, String> {
-    call_provider_with_fallback(state, req, _user_id).await
 }
 
 /// 转换为Provider请求类型

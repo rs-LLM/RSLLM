@@ -1,5 +1,4 @@
 use rbatis::crud;
-use rbatis::rbdc::DateTime;
 use rbs::Value;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -20,9 +19,9 @@ pub struct ModelProviderMapping {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<DateTime>,
+    pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime>,
+    pub updated_at: Option<String>,
 }
 
 crud!(ModelProviderMapping {});

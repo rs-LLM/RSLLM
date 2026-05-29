@@ -7,7 +7,7 @@ use fast_log::config::Config;
 // 用途：导入fast_log的日志大小常量
 // 说明：用于解析日志文件大小配置
 use fast_log::consts::LogSize;
-// 用途：导入fast_log的文件分割插件相关类型
+// 用途：导入fast_log的文件分割相关类型
 // 说明：用于配置日志文件的滚动、保留和压缩策略
 use fast_log::plugin::file_split::{DateType, KeepType, Packer, Rolling, RollingType};
 // 用途：导入rbatis的DateTime类型

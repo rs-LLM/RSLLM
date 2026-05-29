@@ -1,32 +1,36 @@
 use crate::context::CONTEXT;
+use crate::controller::sys::twofa_controller;
 use crate::domain::dto::{IdDTO, SignInDTO, UserAddDTO, UserEditDTO, UserRolePageDTO};
 use crate::domain::vo::response::{ApiResponse, PageWrapper};
 use crate::domain::vo::{JWTToken, SignInVO};
 use crate::middleware::auth_axum::TOKEN_KEY;
+use crate::service::sys::TwoFaService;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::IntoResponse;
 
 #[utoipa::path(
     post,
-    path = "/user/login",
+    path = "/admin/login",
     request_body = SignInDTO,
     responses(
         (status = 200, description = "登录成功", body = ApiResponse<SignInVO>),
-        (status = 401, description = "登录失败", body = ApiResponse<SignInVO>)
+        (status = 401, description = "需要2FA挑战或登录失败", body = ApiResponse<crate::controller::sys::twofa_controller::NeedTwoFaResponse>)
     ),
     tag = "user"
 )]
 pub async fn login(arg: Json<SignInDTO>) -> impl IntoResponse {
-    log::info!("login:{:?}", arg.0);
-    let result = CONTEXT.sys_user_service.sign_in(&arg.0).await;
-    use axum::http::StatusCode;
-    match result {
-        Ok(vo) => (StatusCode::OK, axum::Json(ApiResponse::success(vo))),
+    let service = TwoFaService;
+    match service.sign_in_or_create_challenge(&arg.0).await {
+        Ok(result) => twofa_controller::sign_in_result_to_response(result).into_response(),
         Err(e) => (
-            StatusCode::UNAUTHORIZED,
-            axum::Json(ApiResponse::error("-1", &e.to_string())),
-        ),
+            axum::http::StatusCode::UNAUTHORIZED,
+            axum::Json(ApiResponse::<serde_json::Value>::error(
+                "-1",
+                &e.to_string(),
+            )),
+        )
+            .into_response(),
     }
 }
 

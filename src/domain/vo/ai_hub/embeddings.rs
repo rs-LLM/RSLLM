@@ -1,3 +1,6 @@
+//! 嵌入响应视图对象模块。
+//! 定义 AI Hub 嵌入响应场景使用的响应视图对象。
+
 // 用途：导入序列化和反序列化支持
 // 说明：用于嵌入数据的JSON转换和数据传输
 use serde::{Deserialize, Serialize};
@@ -14,6 +17,8 @@ use super::usage::EmbeddingUsage;
 
 // 用途：嵌入响应结构体
 // 说明：用于表示嵌入生成的结果响应
+/// 嵌入响应结构体。
+/// 表示一次嵌入请求的完整返回，包含向量结果、模型信息与用量统计。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct EmbeddingsResponse {
     // 用途：对象类型
@@ -32,6 +37,8 @@ pub struct EmbeddingsResponse {
 
 // 用途：嵌入数据结构体
 // 说明：用于表示单个文本的嵌入结果
+/// 嵌入数据项结构体。
+/// 表示输入序列中的单条嵌入结果及其位置索引。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct Embeddings {
     // 用途：对象类型
@@ -47,6 +54,8 @@ pub struct Embeddings {
 
 // 用途：嵌入向量枚举
 // 说明：支持多种格式的嵌入向量表示
+/// 嵌入向量表示枚举。
+/// 统一承载字符串、浮点数组或 JSON 形式的嵌入数据。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 #[serde(untagged)]
 pub enum Embedding {

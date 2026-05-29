@@ -2,7 +2,7 @@
 // 说明：用于接收认证检查请求参数
 use crate::domain::dto::auth::SysAuthDTO;
 
-// 用途：导入JWT令牌VO
+// 用途：导入JWT令牌视图对象
 // 说明：用于返回认证结果
 use crate::domain::vo::JWTToken;
 
@@ -17,10 +17,10 @@ pub struct SysAuthService {}
 
 impl SysAuthService {
     /// 用途：检查用户是否有权限访问指定路径
-    /// 说明：验证用户令牌和请求路径的权限关系
+    /// 说明：验证用户访问令牌和请求路径的权限关系
     pub async fn check_auth(&self, arg: SysAuthDTO) -> Result<JWTToken> {
         // 用途：验证令牌有效性
-        // 说明：确保用户提供的令牌是有效的
+        // 说明：确保用户提供的访问令牌是有效的
         let jwt = crate::middleware::auth::checked_token(&arg.access_token)?;
 
         // 用途：检查权限

@@ -10,7 +10,7 @@ use crate::domain::dto::rbac::{PermissionPageDTO, ResEditDTO};
 // 说明：用于数据库操作
 use crate::domain::table::rbac::RbacPermission;
 
-// 用途：导入权限VO
+// 用途：导入权限视图对象
 // 说明：用于返回权限数据
 use crate::domain::vo::rbac::RbacPermissionVO;
 
@@ -50,8 +50,8 @@ impl RbacPermissionService {
         // 用途：查询权限分页数据
         // 说明：根据查询条件从数据库中获取分页数据
         let data = RbacPermission::select_page(pool!(), &PageRequest::from(arg), arg).await?;
-        // 用途：转换为VO分页
-        // 说明：将数据库实体转换为前端需要的VO
+        // 用途：转换为视图对象分页
+        // 说明：将数据库实体转换为前端需要的视图对象
         let page = Page::<RbacPermissionVO>::from(data);
         // 用途：返回分页结果
         // 说明：告知调用者查询成功并返回数据

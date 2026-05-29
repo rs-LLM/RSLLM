@@ -31,7 +31,7 @@ use std::ops::{Deref, DerefMut};
 
 // 用途：令牌头键名常量
 // 说明：定义HTTP头中存储令牌的键名，统一使用"Authorization"
-pub const TOKEN_KEY: &str = "Authorization";
+pub const TOKEN_KEY: http::header::HeaderName = http::header::AUTHORIZATION;
 
 // 用途：Axum认证中间件
 // 说明：用于验证请求中的JWT令牌，自动刷新即将过期的令牌
@@ -49,7 +49,7 @@ pub async fn auth(mut request: Request, next: Next) -> Result<Response, Response
         } else {
             let error_response = axum::Json(serde_json::json!({
                 "code": "401",
-                "msg": "无效的访问令牌，请重新登录",
+                "message": "无效的访问令牌，请重新登录",
                 "data": null
             }));
             let mut response = error_response.into_response();
@@ -59,7 +59,7 @@ pub async fn auth(mut request: Request, next: Next) -> Result<Response, Response
     } else {
         let error_response = axum::Json(serde_json::json!({
             "code": "401",
-            "msg": "缺少访问令牌，请先登录",
+            "message": "缺少访问令牌，请先登录",
             "data": null
         }));
         let mut response = error_response.into_response();
@@ -77,7 +77,7 @@ fn token_is_valid(token: &str) -> Option<JWTToken> {
 }
 
 // 用途：从请求头中获取令牌
-// 说明：提取Authorization头中的令牌字符串，去除Bearer前缀
+// 说明：提取Authorization头中的令牌字符串，去除Bearer 令牌前缀
 fn get_token(h: &HeaderMap) -> Result<&str, Error> {
     Ok(h.get(TOKEN_KEY)
         .map(|v| v.to_str().unwrap_or_default())
@@ -114,10 +114,10 @@ impl<S: Sync> FromRequestParts<S> for JwtAuth {
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         // 用途：从请求头中获取令牌
-        // 说明：提取Authorization头中的令牌字符串，去除Bearer前缀
+        // 说明：提取Authorization头中的令牌字符串，去除Bearer 令牌前缀
         if let Some(auth_header) = parts.headers.get(TOKEN_KEY) {
             if let Ok(auth_str) = auth_header.to_str() {
-                // 用途：去除Bearer前缀
+                // 用途：去除Bearer 令牌前缀
                 // 说明：确保令牌格式正确
                 let token = auth_str.trim_start_matches("Bearer ");
                 // 用途：验证令牌

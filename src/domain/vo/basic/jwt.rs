@@ -1,3 +1,6 @@
+//! JWT 视图对象模块。
+//! 定义认证令牌声明结构及其生成、验证、刷新相关方法。
+
 // 用途：导入自定义错误类型
 // 说明：用于JWT操作中的错误处理
 use crate::error::{ApplicationError, ApplicationResult};
@@ -13,6 +16,8 @@ use serde::{Deserialize, Serialize};
 
 // 用途：JWT认证令牌结构体
 // 说明：用于存储JWT令牌的声明信息，包含用户身份和权限
+/// JWT 认证令牌视图对象。
+/// 表示用于身份校验的声明载荷，包含用户标识、权限、角色与过期时间信息。
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Default)]
 pub struct JWTToken {
     // 用途：用户ID

@@ -8,6 +8,7 @@ use crate::domain::vo::ai_hub::usage_log::{
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::pool;
 use rbatis::rbdc::DateTime;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -111,6 +112,18 @@ impl UsageLogService {
                 if log.created_at.clone().unwrap_or(DateTime::now()) > end_dt {
                     continue;
                 }
+            }
+
+            if let Some(ref request_type) = params.request_type
+                && log.request_type.as_deref() != Some(request_type.as_str())
+            {
+                continue;
+            }
+
+            if let Some(ref status) = params.status
+                && log.status.as_deref() != Some(status.as_str())
+            {
+                continue;
             }
 
             filtered_logs.push(log);
@@ -258,12 +271,21 @@ impl UsageLogService {
                     model_id,
                     (total_tokens, input_tokens, output_tokens, total_cost, request_count),
                 )| {
+                    let (input_cost, output_cost) = if total_tokens > 0 {
+                        (
+                            total_cost * (input_tokens as f64 / total_tokens as f64),
+                            total_cost * (output_tokens as f64 / total_tokens as f64),
+                        )
+                    } else {
+                        (0.0, 0.0)
+                    };
+
                     CostDetailVO {
                         model_id: model_id.clone(),
                         model_name: model_id,
                         total_cost,
-                        input_cost: total_cost * (input_tokens as f64 / total_tokens as f64),
-                        output_cost: total_cost * (output_tokens as f64 / total_tokens as f64),
+                        input_cost,
+                        output_cost,
                         total_tokens,
                         request_count,
                     }
@@ -376,6 +398,18 @@ impl UsageLogService {
                 }
             }
 
+            if let Some(ref request_type) = params.request_type
+                && log.request_type.as_deref() != Some(request_type.as_str())
+            {
+                continue;
+            }
+
+            if let Some(ref status) = params.status
+                && log.status.as_deref() != Some(status.as_str())
+            {
+                continue;
+            }
+
             count += 1;
         }
 
@@ -391,18 +425,39 @@ impl UsageLogService {
             .unwrap_or("unknown")
             .to_string();
 
-        let request_time_ts = log.request_time.map(|dt| dt.unix_timestamp()).unwrap_or(0);
+        let request_time_ts = log
+            .request_time
+            .clone()
+            .map(|dt| dt.unix_timestamp())
+            .unwrap_or(0);
 
-        let response_time_ts = log.response_time.map(|dt| dt.unix_timestamp()).unwrap_or(0);
+        let response_time_ts = log
+            .response_time
+            .clone()
+            .map(|dt| dt.unix_timestamp())
+            .unwrap_or(0);
 
         let created_at_str = log
             .created_at
+            .clone()
             .map(|t| t.to_string())
             .unwrap_or_else(|| DateTime::now().to_string());
 
         let status_code = log.status_code.unwrap_or(0);
 
-        let id = log.id.unwrap_or_else(|| log.user_id.clone());
+        let id = log.id.clone().unwrap_or_else(|| log.user_id.clone());
+
+        let response_time_ms = log.response_time_ms.unwrap_or(0);
+        let (ttfb_ms, upstream_latency_ms, local_postprocess_ms) =
+            Self::extract_performance_metrics(&log.extra, response_time_ms);
+        let (cache_hit, cached_tokens) = Self::extract_cache_metrics(&log.extra);
+
+        let (
+            upstream_oauth_provider_type,
+            upstream_oauth_account_key,
+            upstream_oauth_account_id,
+            upstream_oauth_email,
+        ) = Self::resolve_upstream_oauth(&log);
 
         AiHubUsageLogVO {
             id: id,
@@ -419,11 +474,195 @@ impl UsageLogService {
             total_cost: log.total_cost,
             input_price: log.input_price,
             output_price: log.output_price,
+            price_unit: log.price_unit,
             status_code,
             error_message: log.error_message,
             request_time: request_time_ts,
             response_time: response_time_ts,
+            response_time_ms,
+            ttfb_ms,
+            upstream_latency_ms,
+            local_postprocess_ms,
+            cache_hit,
+            cached_tokens,
+            upstream_oauth_account_key,
+            upstream_oauth_email,
+            upstream_oauth_account_id,
+            upstream_oauth_provider_type,
             created_at: created_at_str,
         }
+    }
+
+    fn extract_performance_metrics(
+        extra: &Option<Value>,
+        response_time_ms: i64,
+    ) -> (i64, i64, i64) {
+        let Some(extra_json) = extra else {
+            return (0, 0, 0);
+        };
+
+        let performance = extra_json.get("performance");
+
+        let ttfb_ms = performance
+            .and_then(|p| p.get("ttfb_ms"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        let upstream_latency_ms = performance
+            .and_then(|p| p.get("upstream_latency_ms"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        let mut local_postprocess_ms = performance
+            .and_then(|p| p.get("local_postprocess_ms"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        if local_postprocess_ms <= 0 && response_time_ms > 0 && upstream_latency_ms > 0 {
+            local_postprocess_ms = (response_time_ms - upstream_latency_ms).max(0);
+        }
+
+        (
+            ttfb_ms.max(0),
+            upstream_latency_ms.max(0),
+            local_postprocess_ms.max(0),
+        )
+    }
+
+    fn extract_cache_metrics(extra: &Option<Value>) -> (bool, i64) {
+        let Some(extra_json) = extra else {
+            return (false, 0);
+        };
+
+        let explicit_hit = extra_json
+            .get("cache_hit")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let direct_cached_tokens = extra_json.get("cached_tokens").and_then(Value::as_i64);
+
+        let prompt_cached_tokens = extra_json
+            .get("prompt_tokens_details")
+            .and_then(|v| v.get("cached_tokens"))
+            .and_then(Value::as_i64);
+
+        let usage_prompt_cached_tokens = extra_json
+            .get("usage")
+            .and_then(|v| v.get("prompt_tokens_details"))
+            .and_then(|v| v.get("cached_tokens"))
+            .and_then(Value::as_i64);
+
+        let message_extras_cached_tokens = extra_json
+            .get("message_extras")
+            .and_then(Value::as_array)
+            .and_then(|arr| {
+                arr.iter().find_map(|item| {
+                    item.get("prompt_tokens_details")
+                        .and_then(|v| v.get("cached_tokens"))
+                        .and_then(Value::as_i64)
+                })
+            });
+
+        let cached_tokens = direct_cached_tokens
+            .or(prompt_cached_tokens)
+            .or(usage_prompt_cached_tokens)
+            .or(message_extras_cached_tokens)
+            .unwrap_or(0);
+
+        (explicit_hit || cached_tokens > 0, cached_tokens)
+    }
+
+    fn resolve_upstream_oauth(
+        log: &AiHubUsageLog,
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
+        let provider_type = log
+            .upstream_oauth_provider_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        let account_key = log
+            .upstream_oauth_account_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        let account_id = log
+            .upstream_oauth_account_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        let email = log
+            .upstream_oauth_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        if provider_type.is_some()
+            || account_key.is_some()
+            || account_id.is_some()
+            || email.is_some()
+        {
+            return (provider_type, account_key, account_id, email);
+        }
+
+        Self::extract_upstream_oauth_from_extra(&log.extra)
+    }
+
+    fn extract_upstream_oauth_from_extra(
+        extra: &Option<Value>,
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
+        let Some(extra_json) = extra else {
+            return (None, None, None, None);
+        };
+
+        let Some(upstream) = extra_json.get("upstream_oauth") else {
+            return (None, None, None, None);
+        };
+
+        let provider_type = upstream
+            .get("provider_type")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        let account_key = upstream
+            .get("account_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        let account_id = upstream
+            .get("account_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        let email = upstream
+            .get("email")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        (provider_type, account_key, account_id, email)
     }
 }

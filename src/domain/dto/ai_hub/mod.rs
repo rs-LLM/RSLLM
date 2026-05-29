@@ -1,9 +1,20 @@
+//! AI Hub DTO module.
+//! Exports AI Hub request/response DTO submodules for chat, embeddings, responses, usage, quotas, and related validation/config payloads.
+
 // 用途：导出AI Hub DTO相关模块
 
 // 用途：导出聊天完成相关DTO
 // 说明：包含聊天对话请求和推理配置等DTO
 pub mod chat;
 pub use chat::*;
+
+// 用途：导出 completions 兼容请求 DTO
+pub mod completion;
+pub use completion::*;
+
+// 用途：导出 Claude messages 兼容请求 DTO
+pub mod messages;
+pub use messages::*;
 
 // 用途：导出消息内容相关DTO
 // 说明：包含聊天消息、角色定义、内容格式等DTO
@@ -46,6 +57,10 @@ pub use analytics::*;
 pub mod transaction;
 pub use transaction::*;
 
+// 用途：导出 Dashboard Billing 兼容 DTO
+pub mod dashboard_billing;
+pub use dashboard_billing::*;
+
 // 用途：导出输入验证相关DTO
 // 说明：包含统一的输入参数验证功能
 pub mod validation;
@@ -67,3 +82,9 @@ pub use user_level_config::*;
 // 说明：包含Responses API请求和响应等DTO
 pub mod responses;
 pub use responses::*;
+
+pub mod redeem_code;
+pub use redeem_code::*;
+
+pub mod subscription;
+pub use subscription::*;

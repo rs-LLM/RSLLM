@@ -1,3 +1,6 @@
+//! Responses API 视图对象模块。
+//! 定义 Responses API 的状态、错误、输出与流式分块等响应结构，供 AI Hub 接口对外返回。
+
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据传输
 use serde::{Deserialize, Serialize};
@@ -14,6 +17,8 @@ use super::usage::Usage;
 
 // 用途：响应状态枚举
 // 说明：表示Responses API响应的不同状态
+/// 响应状态枚举。
+/// 表示 Responses API 在处理生命周期中的状态阶段。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ResponseStatus {
@@ -36,6 +41,8 @@ pub enum ResponseStatus {
 
 // 用途：响应错误结构体
 // 说明：表示Responses API的错误信息
+/// 响应错误结构体。
+/// 表示 Responses API 返回的错误类型、消息与可选上下文。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct ResponseError {
     // 用途：错误类型
@@ -55,8 +62,36 @@ pub struct ResponseError {
     pub param: Option<String>,
 }
 
+#[derive(Deserialize, Serialize, Clone, ToSchema)]
+pub struct OpenAIErrorResponse {
+    pub error: ResponseError,
+}
+
+impl OpenAIErrorResponse {
+    pub fn new(status_code: u16, message: impl Into<String>) -> Self {
+        let code = status_code.to_string();
+        Self {
+            error: ResponseError {
+                error_type: match status_code {
+                    400 => "invalid_request_error",
+                    401 => "authentication_error",
+                    402 => "billing_error",
+                    429 => "rate_limit_error",
+                    _ => "server_error",
+                }
+                .to_string(),
+                message: message.into(),
+                code: Some(code),
+                param: None,
+            },
+        }
+    }
+}
+
 // 用途：响应输出内容枚举
 // 说明：支持多种输出类型
+/// 响应输出内容枚举。
+/// 统一承载消息文本、纯文本或多模态输出的数据形态。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 #[serde(untagged)]
 pub enum ResponseOutput {
@@ -73,6 +108,8 @@ pub enum ResponseOutput {
 
 // 用途：工具调用结构体
 // 说明：表示工具调用的详细信息
+/// 工具调用结构体。
+/// 表示一次工具调用的标识、类型与函数调用参数。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct ResponseToolCall {
     // 用途：工具调用ID
@@ -89,6 +126,8 @@ pub struct ResponseToolCall {
 
 // 用途：函数调用结构体
 // 说明：表示函数调用的详细信息
+/// 函数调用结构体。
+/// 表示工具调用中的函数名与序列化后的参数内容。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct ResponseFunctionCall {
     // 用途：函数名称
@@ -101,6 +140,8 @@ pub struct ResponseFunctionCall {
 
 // 用途：推理过程结构体
 // 说明：表示模型的推理过程内容
+/// 推理过程结构体。
+/// 表示模型在响应过程中产出的推理文本与可选 token 计数。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct ResponseReasoning {
     // 用途：推理内容
@@ -114,6 +155,8 @@ pub struct ResponseReasoning {
 
 // 用途：Responses API响应结构体
 // 说明：用于表示Responses API的完整响应，这是OpenAI推荐的新API响应格式
+/// Responses API 响应结构体。
+/// 表示一次非流式响应的完整结果，包含状态、输出、用量与上下文信息。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct Response {
     // 用途：响应ID
@@ -179,6 +222,8 @@ pub struct Response {
 
 // 用途：Responses API流式响应结构体
 // 说明：用于表示Responses API的流式响应分块
+/// Responses API 流式响应分块结构体。
+/// 表示流式输出过程中的单个增量分块与状态信息。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct ResponseChunk {
     // 用途：响应ID
@@ -205,6 +250,8 @@ pub struct ResponseChunk {
 
 // 用途：响应增量结构体
 // 说明：表示流式响应中的增量内容
+/// 响应增量结构体。
+/// 表示流式响应分块中的内容增量、工具调用增量与完成原因。
 #[derive(Deserialize, Serialize, Clone, ToSchema)]
 pub struct ResponseDelta {
     // 用途：增量内容

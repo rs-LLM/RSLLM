@@ -1,10 +1,10 @@
-//! 统计分析VO模块
-//! 提供统计分析相关的视图对象
+//! 统计分析视图对象模块。
+//! 定义 AI Hub 统计分析场景使用的响应视图对象。
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// 用户用量统计VO
+/// 用户用量统计视图对象
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct UserUsageStatsVO {
     /// 用户ID
@@ -27,7 +27,7 @@ pub struct UserUsageStatsVO {
     pub daily_stats: Vec<DailyStatsVO>,
 }
 
-/// 模型统计VO
+/// 模型统计视图对象
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ModelStatsVO {
     /// 模型ID
@@ -42,7 +42,7 @@ pub struct ModelStatsVO {
     pub cost: f64,
 }
 
-/// 日统计VO
+/// 日统计视图对象
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct DailyStatsVO {
     /// 日期
@@ -57,7 +57,7 @@ pub struct DailyStatsVO {
     pub cost: f64,
 }
 
-/// 系统统计VO
+/// 系统统计视图对象
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct SystemStatsVO {
     /// 总请求数
@@ -74,7 +74,7 @@ pub struct SystemStatsVO {
     pub top_models: Vec<ModelStatsVO>,
 }
 
-/// 热门用户统计VO
+/// 热门用户统计视图对象
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct TopUserStatsVO {
     /// 用户ID
@@ -87,7 +87,7 @@ pub struct TopUserStatsVO {
     pub cost: f64,
 }
 
-/// 性能趋势VO
+/// 性能趋势视图对象
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct PerformanceTrendsVO {
     /// 成功率（百分比）
@@ -98,7 +98,7 @@ pub struct PerformanceTrendsVO {
     pub hourly_trends: Vec<HourlyTrendVO>,
 }
 
-/// 小时趋势VO
+/// 小时趋势视图对象
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct HourlyTrendVO {
     /// 小时

@@ -32,6 +32,10 @@ impl Default for UserLevelService {
 }
 
 impl UserLevelService {
+    async fn ensure_default_levels_integrity(&self) -> ApplicationResult<()> {
+        self.init_default_levels().await
+    }
+
     /// 创建服务实例
     pub fn new() -> Self {
         Self {}
@@ -39,6 +43,7 @@ impl UserLevelService {
 
     /// 获取所有用户等级配置
     pub async fn get_all_levels(&self) -> ApplicationResult<Vec<UserLevelConfigVO>> {
+        self.ensure_default_levels_integrity().await?;
         let configs = UserLevelConfig::select_all(pool!()).await?;
 
         let vos: Vec<UserLevelConfigVO> = configs
@@ -52,8 +57,14 @@ impl UserLevelService {
                     rpm_limit: config.rpm_limit,
                     tpm_limit: config.tpm_limit,
                     enabled: config.enabled,
-                    created_at: config.created_at?,
-                    updated_at: config.updated_at?,
+                    created_at: config
+                        .created_at
+                        .map(|dt| dt.to_string())
+                        .unwrap_or_default(),
+                    updated_at: config
+                        .updated_at
+                        .map(|dt| dt.to_string())
+                        .unwrap_or_default(),
                 })
             })
             .collect();
@@ -66,6 +77,7 @@ impl UserLevelService {
         &self,
         dto: QueryUserLevelsDTO,
     ) -> ApplicationResult<UserLevelListResponse> {
+        self.ensure_default_levels_integrity().await?;
         let page = dto.page.unwrap_or(1);
         let page_size = dto.page_size.unwrap_or(20);
         let offset = (page - 1) * page_size;
@@ -103,8 +115,14 @@ impl UserLevelService {
                     rpm_limit: config.rpm_limit,
                     tpm_limit: config.tpm_limit,
                     enabled: config.enabled,
-                    created_at: config.created_at?,
-                    updated_at: config.updated_at?,
+                    created_at: config
+                        .created_at
+                        .map(|dt| dt.to_string())
+                        .unwrap_or_default(),
+                    updated_at: config
+                        .updated_at
+                        .map(|dt| dt.to_string())
+                        .unwrap_or_default(),
                 })
             })
             .collect();
@@ -122,6 +140,7 @@ impl UserLevelService {
         &self,
         level_code: &str,
     ) -> ApplicationResult<UserLevelConfigVO> {
+        self.ensure_default_levels_integrity().await?;
         let config = UserLevelConfig::select_by_map(pool!(), rbs::value! { "level": level_code })
             .await?
             .first()
@@ -144,20 +163,20 @@ impl UserLevelService {
             rpm_limit: config.rpm_limit,
             tpm_limit: config.tpm_limit,
             enabled: config.enabled,
-            created_at: config
-                .created_at
-                .ok_or_else(|| ApplicationError::BusinessError {
+            created_at: config.created_at.map(|dt| dt.to_string()).ok_or_else(|| {
+                ApplicationError::BusinessError {
                     message: "User level config missing created_at".to_string(),
                     code: Some("MISSING_CREATED_AT".to_string()),
                     context: None,
-                })?,
-            updated_at: config
-                .updated_at
-                .ok_or_else(|| ApplicationError::BusinessError {
+                }
+            })?,
+            updated_at: config.updated_at.map(|dt| dt.to_string()).ok_or_else(|| {
+                ApplicationError::BusinessError {
                     message: "User level config missing updated_at".to_string(),
                     code: Some("MISSING_UPDATED_AT".to_string()),
                     context: None,
-                })?,
+                }
+            })?,
         })
     }
 
@@ -197,6 +216,7 @@ impl UserLevelService {
 
     /// 获取用户当前等级详细信息
     pub async fn get_user_level_info(&self, user_id: &str) -> ApplicationResult<UserLevelVO> {
+        self.ensure_default_levels_integrity().await?;
         let user = SysUser::select_by_map(pool!(), rbs::value! { "id": user_id })
             .await?
             .first()
@@ -290,20 +310,20 @@ impl UserLevelService {
             rpm_limit: config.rpm_limit,
             tpm_limit: config.tpm_limit,
             enabled: config.enabled,
-            created_at: config
-                .created_at
-                .ok_or_else(|| ApplicationError::BusinessError {
+            created_at: config.created_at.map(|dt| dt.to_string()).ok_or_else(|| {
+                ApplicationError::BusinessError {
                     message: "Level missing created_at".to_string(),
                     code: Some("MISSING_CREATED_AT".to_string()),
                     context: None,
-                })?,
-            updated_at: config
-                .updated_at
-                .ok_or_else(|| ApplicationError::BusinessError {
+                }
+            })?,
+            updated_at: config.updated_at.map(|dt| dt.to_string()).ok_or_else(|| {
+                ApplicationError::BusinessError {
                     message: "Level missing updated_at".to_string(),
                     code: Some("MISSING_UPDATED_AT".to_string()),
                     context: None,
-                })?,
+                }
+            })?,
         })
     }
 
@@ -351,20 +371,22 @@ impl UserLevelService {
             rpm_limit: updated_config.rpm_limit,
             tpm_limit: updated_config.tpm_limit,
             enabled: updated_config.enabled,
-            created_at: updated_config.created_at.ok_or_else(|| {
-                ApplicationError::BusinessError {
+            created_at: updated_config
+                .created_at
+                .map(|dt| dt.to_string())
+                .ok_or_else(|| ApplicationError::BusinessError {
                     message: "User level config missing created_at".to_string(),
                     code: Some("MISSING_CREATED_AT".to_string()),
                     context: None,
-                }
-            })?,
-            updated_at: updated_config.updated_at.ok_or_else(|| {
-                ApplicationError::BusinessError {
+                })?,
+            updated_at: updated_config
+                .updated_at
+                .map(|dt| dt.to_string())
+                .ok_or_else(|| ApplicationError::BusinessError {
                     message: "User level config missing updated_at".to_string(),
                     code: Some("MISSING_UPDATED_AT".to_string()),
                     context: None,
-                }
-            })?,
+                })?,
         })
     }
 
@@ -374,6 +396,7 @@ impl UserLevelService {
         user_id: &str,
         dto: UpdateUserLevelDTO,
     ) -> ApplicationResult<()> {
+        self.ensure_default_levels_integrity().await?;
         let user = SysUser::select_by_map(pool!(), rbs::value! { "id": user_id })
             .await?
             .first()
@@ -412,6 +435,7 @@ impl UserLevelService {
                 password: user.password,
                 name: user.name,
                 email: user.email,
+                avatar: user.avatar,
                 login_check: user.login_check,
                 state: user.state,
                 create_date: user.create_date,

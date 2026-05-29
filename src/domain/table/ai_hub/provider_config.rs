@@ -1,9 +1,6 @@
 //! 供应商配置表结构
 //! 存储AI服务供应商的完整配置信息，支持认证、限流和熔断
 
-// 用途：导入日期时间类型
-// 说明：用于记录供应商的创建和更新时间
-use rbatis::rbdc::DateTime;
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据持久化
 use serde::{Deserialize, Deserializer, Serialize};
@@ -12,6 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json;
 // 用途：导入rbatis的CRUD宏
 // 说明：用于自动生成增删改查操作
+use crate::domain::dto::provider::ProviderType;
 use rbatis::crud;
 
 // 用途：自定义反序列化函数，支持从整数或布尔值反序列化为布尔类型
@@ -91,11 +89,11 @@ pub struct ProviderConfig {
     // 用途：创建时间
     // 说明：记录的创建时间
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<DateTime>,
+    pub created_at: Option<String>,
     // 用途：更新时间
     // 说明：记录的最后更新时间
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime>,
+    pub updated_at: Option<String>,
 }
 
 // 用途：生成ProviderConfig的CRUD操作宏
@@ -105,6 +103,12 @@ crud!(ProviderConfig {});
 // 用途：ProviderConfig的自定义查询方法
 // 说明：提供业务特定的查询方法
 impl ProviderConfig {
+    fn normalize_provider_type_for_query(provider_type: &str) -> String {
+        ProviderType::parse(provider_type)
+            .map(|parsed| parsed.to_string())
+            .unwrap_or_else(|| provider_type.trim().to_lowercase())
+    }
+
     /// 根据供应商代号查询配置
     pub async fn select_by_provider_code(
         rb: &rbatis::RBatis,
@@ -155,8 +159,9 @@ impl ProviderConfig {
         rb: &rbatis::RBatis,
         provider_type: &str,
     ) -> rbatis::Result<Vec<ProviderConfig>> {
-        let sql = "SELECT * FROM provider_config WHERE provider_type = ? ORDER BY created_at DESC";
-        rb.query(sql, vec![rbs::Value::String(provider_type.to_string())])
+        let normalized_provider_type = Self::normalize_provider_type_for_query(provider_type);
+        let sql = "SELECT * FROM provider_config WHERE LOWER(TRIM(provider_type)) = ? ORDER BY created_at DESC";
+        rb.query(sql, vec![rbs::Value::String(normalized_provider_type)])
             .await
             .map(|v| {
                 v.as_array()
@@ -202,5 +207,28 @@ impl ProviderConfig {
                 })
                 .unwrap_or_default()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProviderConfig;
+
+    #[test]
+    fn normalize_provider_type_for_query_should_trim_and_lowercase() {
+        let normalized = ProviderConfig::normalize_provider_type_for_query("  OpenAI-Compatible  ");
+        assert_eq!(normalized, "openai-compatible");
+    }
+
+    #[test]
+    fn normalize_provider_type_for_query_should_keep_canonical_input_unchanged() {
+        let normalized = ProviderConfig::normalize_provider_type_for_query("custom");
+        assert_eq!(normalized, "custom");
+    }
+
+    #[test]
+    fn normalize_provider_type_for_query_should_keep_unknown_value_query_compatible() {
+        let normalized = ProviderConfig::normalize_provider_type_for_query("  Claude  ");
+        assert_eq!(normalized, "claude");
     }
 }

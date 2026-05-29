@@ -1,7 +1,6 @@
 // 用途：导入应用程序配置结构体
 // 说明：用于在服务上下文中存储和访问应用程序配置
 use crate::config::application::ApplicationConfig;
-
 // 用途：导入各种服务结构体
 // 说明：用于在服务上下文中存储和管理各种业务服务实例
 use crate::service::{
@@ -56,6 +55,10 @@ use std::time::Duration;
 use rbatis::rbdc::DateTime;
 use std::collections::HashMap;
 use std::sync::RwLock;
+
+const DEFAULT_ENCRYPTION_KEY: &str = "rsllm_encryption_key_default_key";
+const APP_ENV_KEYS: [&str; 4] = ["RSLLM_ENV", "APP_ENV", "RUN_MODE", "ENVIRONMENT"];
+const PRODUCTION_ENVS: [&str; 3] = ["prod", "production", "release"];
 
 /// 用途：全局服务上下文
 /// 说明：提供应用程序级别的全局状态管理，包括配置、数据库连接和各种服务实例
@@ -127,7 +130,7 @@ pub struct ServiceContext {
     // 说明：管理AI服务供应商的配置
     pub provider_registry: Arc<tokio::sync::RwLock<crate::providers::registry::ProviderRegistry>>, // 用途：供应商注册表
     // 说明：管理和注册所有AI服务供应商
-    pub model_router: Arc<crate::routers::model_router::ModelRouter>, // 用途：模型路由器
+    pub model_router: Arc<crate::router::model_router::ModelRouter>, // 用途：模型路由器
     // 说明：解析模型标识符并路由到正确的供应商和模型
 
     // 内存缓存字段
@@ -192,9 +195,20 @@ impl ServiceContext {
         // 说明：根据配置的数据库URL建立连接
         // 包含：自动根据数据库URL选择驱动
         self.rb
-            .link(include!("../target/driver.rs"), &self.config.db_url)
+            .link(
+                include!(concat!(env!("OUT_DIR"), "/driver.rs")),
+                &self.config.db_url,
+            )
             .await
             .expect("[rsllm] rbatis pool init fail!");
+
+        // SQLite 并发写兼容：启用 WAL + busy_timeout，减少 database is locked
+        if self.config.db_url.starts_with("sqlite") {
+            if let Ok(conn) = self.rb.acquire().await {
+                let _ = conn.exec("PRAGMA journal_mode=WAL;", vec![]).await;
+                let _ = conn.exec("PRAGMA busy_timeout=5000;", vec![]).await;
+            }
+        }
 
         // 用途：添加回收站服务拦截器
         // 说明：用于拦截数据库操作，实现回收站功能
@@ -213,8 +227,13 @@ impl ServiceContext {
 
         // 用途：设置最大连接数
         // 说明：控制数据库连接池的最大连接数量，避免连接过多导致数据库压力过大
-        pool.set_max_open_conns(self.config.db_pool_len as u64)
-            .await;
+        // 注意：sqlite 多连接并发写会导致大量 database is locked，这里强制单连接
+        if self.config.db_url.starts_with("sqlite") {
+            pool.set_max_open_conns(1).await;
+        } else {
+            pool.set_max_open_conns(self.config.db_pool_len as u64)
+                .await;
+        }
 
         // 用途：设置连接超时时间
         // 说明：控制获取数据库连接的最大等待时间，避免长时间阻塞
@@ -254,10 +273,7 @@ impl ServiceContext {
 
         // 用途：创建加密服务用于解密API密钥
         // 说明：从环境变量获取加密密钥，如果未设置则使用默认密钥
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .unwrap_or_else(|_| "rsllm_encryption_key_default_key".to_string());
-        let encryption_service = EncryptionService::new(encryption_key.as_bytes())
-            .expect("Failed to create encryption service");
+        let encryption_service = Self::create_encryption_service();
 
         // 用途：初始化供应商注册表
         // 说明：根据加载的供应商配置创建供应商实例并注册到注册表中
@@ -282,10 +298,7 @@ impl ServiceContext {
         log::info!("[rsllm] init AI Hub management services...");
 
         // 创建加密服务 - 从环境变量获取加密密钥，如果未设置则使用默认密钥
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .unwrap_or_else(|_| "rsllm_encryption_key_default_key".to_string());
-        let encryption_service = EncryptionService::new(encryption_key.as_bytes())
-            .expect("Failed to create encryption service");
+        let encryption_service = Self::create_encryption_service();
 
         // 获取当前ServiceContext的Arc引用
         let ctx_arc = Arc::new(self.clone());
@@ -299,13 +312,73 @@ impl ServiceContext {
         log::info!("[rsllm] AI Hub management services initialized successfully");
     }
 
-    /// 用途：获取解密的API密钥（带缓存）
+    fn create_cache_service(config: &ApplicationConfig) -> CacheService {
+        CacheService::new(config).expect("[rsllm] cache service init fail!")
+    }
+
+    fn create_storage_service(config: &ApplicationConfig) -> StorageService {
+        StorageService::new(&config.storage).expect("Failed to create storage service")
+    }
+
+    fn create_encryption_service() -> EncryptionService {
+        let encryption_key = Self::resolve_encryption_key();
+        EncryptionService::new(encryption_key.as_bytes())
+            .expect("Failed to create encryption service")
+    }
+
+    fn resolve_encryption_key() -> String {
+        if let Ok(key) = std::env::var("ENCRYPTION_KEY") {
+            let trimmed = key.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+            log::warn!("[rsllm] ENCRYPTION_KEY is set but empty, fallback policy will be applied");
+        }
+
+        if Self::is_strict_encryption_key_mode() {
+            panic!(
+                "ENCRYPTION_KEY is required in production mode. Set ENCRYPTION_KEY or explicitly allow fallback in non-production only"
+            );
+        }
+
+        log::warn!(
+            "[rsllm] ENCRYPTION_KEY is not configured. Using development fallback key. DO NOT use this in production"
+        );
+        DEFAULT_ENCRYPTION_KEY.to_string()
+    }
+
+    fn is_strict_encryption_key_mode() -> bool {
+        let allow_default = std::env::var("RSLLM_ALLOW_DEFAULT_ENCRYPTION_KEY")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false);
+
+        if allow_default {
+            return false;
+        }
+
+        APP_ENV_KEYS
+            .iter()
+            .filter_map(|key| std::env::var(key).ok())
+            .map(|value| value.trim().to_ascii_lowercase())
+            .any(|value| PRODUCTION_ENVS.iter().any(|prod| *prod == value))
+    }
+
+    fn create_async_optional_service<T>() -> Arc<tokio::sync::RwLock<Option<T>>> {
+        Arc::new(tokio::sync::RwLock::new(None))
+    }
+
+    /// 用途：获取��密的API密钥（带缓存）
     /// 说明：从缓存中获取已解密的API密钥，如果缓存不存在则解密并缓存
     pub fn get_decrypted_api_key(
         &self,
         provider_id: &str,
         _encrypted_key: &str,
-    ) -> Result<String, String> {
+    ) -> std::result::Result<String, String> {
         // 尝试从缓存中获取
         {
             let cache = self.api_key_cache.read().unwrap();
@@ -383,7 +456,7 @@ impl Default for ServiceContext {
         let provider_registry = Arc::new(tokio::sync::RwLock::new(
             crate::providers::registry::ProviderRegistry::new(),
         ));
-        let model_router = Arc::new(crate::routers::model_router::ModelRouter::new(
+        let model_router = Arc::new(crate::router::model_router::ModelRouter::new(
             provider_registry.clone(),
         ));
 
@@ -396,12 +469,11 @@ impl Default for ServiceContext {
 
             // 用途：初始化缓存服务
             // 说明：创建缓存服务实例，用于缓存数据
-            cache_service: CacheService::new(&config).expect("[rsllm] cache service init fail!"),
+            cache_service: Self::create_cache_service(&config),
 
             // 用途：初始化存储服务
             // 说明：创建存储服务实例，用于文件存储
-            storage_service: StorageService::new(&config.storage)
-                .expect("Failed to create storage service"),
+            storage_service: Self::create_storage_service(&config),
 
             // 用途：初始化系统用户服务
             // 说明：创建用户服务实例，用于处理用户相关业务
@@ -459,7 +531,7 @@ impl Default for ServiceContext {
 
             // 用途：初始化API密钥管理服务
             // 说明：创建API密钥管理服务实例，用于处理API密钥创建、验证和管理相关业务
-            api_key_service: ApiKeyService {},
+            api_key_service: ApiKeyService::new(),
 
             // 用途：初始化余额管理服务
             // 说明：创建余额管理服务实例，用于处理用户余额查询和管理相关业务
@@ -489,7 +561,7 @@ impl Default for ServiceContext {
 
             // 用途：初始化AI Hub管理服务
             // 说明：创建模型和供应商管理服务实例
-            provider_config_service: Arc::new(tokio::sync::RwLock::new(None)), // 将在init_providers中初始化
+            provider_config_service: Self::create_async_optional_service(), // 将在init_providers中初始化
 
             // 用途：初始化内存缓存
             // 说明：创建API密钥和模型列表的内存缓存
@@ -502,5 +574,60 @@ impl Default for ServiceContext {
             // 说明：将加载的配置赋值给服务上下文
             config,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{APP_ENV_KEYS, PRODUCTION_ENVS, ServiceContext};
+
+    #[test]
+    fn strict_mode_detects_production_env() {
+        let env_pairs = APP_ENV_KEYS
+            .iter()
+            .zip(PRODUCTION_ENVS.iter().cycle())
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect::<Vec<_>>();
+
+        let strict = ServiceContext::is_strict_encryption_key_mode_for_test(false, &env_pairs);
+        assert!(
+            strict,
+            "strict mode should be enabled when production env is detected"
+        );
+    }
+
+    #[test]
+    fn strict_mode_can_be_disabled_by_explicit_override() {
+        let env_pairs = vec![("RSLLM_ENV".to_string(), "production".to_string())];
+        let strict = ServiceContext::is_strict_encryption_key_mode_for_test(true, &env_pairs);
+        assert!(!strict, "explicit override should disable strict mode");
+    }
+
+    #[test]
+    fn strict_mode_is_off_for_non_production_env() {
+        let env_pairs = vec![("RSLLM_ENV".to_string(), "development".to_string())];
+        let strict = ServiceContext::is_strict_encryption_key_mode_for_test(false, &env_pairs);
+        assert!(
+            !strict,
+            "non-production environment should not enforce strict mode"
+        );
+    }
+}
+
+impl ServiceContext {
+    #[cfg(test)]
+    fn is_strict_encryption_key_mode_for_test(
+        allow_default: bool,
+        env_pairs: &[(String, String)],
+    ) -> bool {
+        if allow_default {
+            return false;
+        }
+
+        env_pairs
+            .iter()
+            .filter(|(key, _)| APP_ENV_KEYS.iter().any(|candidate| candidate == key))
+            .map(|(_, value)| value.trim().to_ascii_lowercase())
+            .any(|value| PRODUCTION_ENVS.iter().any(|prod| *prod == value))
     }
 }

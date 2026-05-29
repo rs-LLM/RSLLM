@@ -41,6 +41,7 @@ pub struct UserAddDTO {
     // 用途：用户邮箱
     // 说明：用于用户注册和找回密码，唯一标识用户身份
     pub email: Option<String>,
+    pub avatar: Option<String>,
     // 用途：登录检查状态
     // 说明：用于控制用户登录行为
     #[schema(value_type = Option<String>)]
@@ -54,6 +55,7 @@ pub struct UserAddDTO {
     // 用途：用户余额
     // 说明：用于设置用户的初始余额，默认为0
     pub balance: Option<f64>,
+    pub user_level: Option<String>,
 }
 
 // 用途：实现UserAddDTO到SysUser的转换
@@ -68,11 +70,12 @@ impl From<UserAddDTO> for SysUser {
             password: PasswordEncoder::encode(&arg.password.unwrap_or_default()).into(),
             name: arg.name.clone(),
             email: arg.email.clone(),
+            avatar: arg.avatar,
             login_check: arg.login_check.clone(),
             state: Some(arg.state.unwrap_or(1)),
             balance: arg.balance,
             create_date: DateTime::now().into(),
-            user_level: Some("L1".to_string()),
+            user_level: arg.user_level.or(Some("L1".to_string())),
         }
     }
 }
@@ -95,6 +98,9 @@ pub struct UserEditDTO {
     // 用途：用户姓名
     // 说明：用于修改用户姓名
     pub name: Option<String>,
+    pub email: Option<String>,
+    pub avatar: Option<String>,
+    pub user_level: Option<String>,
     // 用途：用户状态
     // 说明：用于修改用户状态（启用/禁用）
     pub state: Option<i32>,
@@ -118,12 +124,13 @@ impl From<UserEditDTO> for SysUser {
             account: arg.account,
             password: arg.password,
             name: arg.name,
-            email: None,
+            email: arg.email,
+            avatar: arg.avatar,
             login_check: arg.login_check,
             state: arg.state,
             create_date: None,
             balance: None,
-            user_level: None,
+            user_level: arg.user_level,
         }
     }
 }

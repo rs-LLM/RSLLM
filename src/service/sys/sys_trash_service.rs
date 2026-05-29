@@ -1,6 +1,7 @@
 // 用途：导入全局上下文实例
 // 说明：用于访问配置信息
 use crate::context::CONTEXT;
+use crate::domain::table::key_value_config::KeyValueConfig;
 // 用途：导入系统回收站表结构
 // 说明：用于数据库操作和数据存储
 use crate::domain::table::sys_trash::SysTrash;
@@ -84,7 +85,12 @@ impl SysTrashService {
 
     // 用途：添加数据到回收站
     // 说明：将被删除的数据保存到回收站，以便后续恢复或查看
-    pub async fn add<T>(&self, table_name: &str, args: &[T]) -> Result<u64, Error>
+    pub async fn add<T>(
+        &self,
+        rb: &dyn Executor,
+        table_name: &str,
+        args: &[T],
+    ) -> Result<u64, Error>
     where
         T: Serialize,
     {
@@ -111,7 +117,7 @@ impl SysTrashService {
         }
         // 用途：批量插入回收站记录
         // 说明：提高插入性能
-        let r = SysTrash::insert_batch(pool!(), &trashes, 20)
+        let r = SysTrash::insert_batch(rb, &trashes, 20)
             .await?
             .rows_affected;
         // 用途：检查是否需要清理回收站
@@ -119,7 +125,7 @@ impl SysTrashService {
         let diff = now.clone().0 - self.recycle_date.lock().0.clone();
         if diff > Duration::from_secs(24 * 3600) {
             *self.recycle_date.lock() = now.clone();
-            let _ = self.recycle().await;
+            let _ = self.recycle_with_executor(rb).await;
         }
         // 用途：返回插入的记录数
         // 说明：告知调用者插入结果
@@ -129,14 +135,28 @@ impl SysTrashService {
     // 用途：清理超过保留期限的回收站数据
     // 说明：自动清理旧数据，释放存储空间
     pub async fn recycle(&self) -> Result<u64, Error> {
+        self.recycle_with_executor(pool!()).await
+    }
+
+    pub async fn recycle_with_executor(&self, rb: &dyn Executor) -> Result<u64, Error> {
         // 用途：计算保留期限的截止时间
         // 说明：根据配置的保留天数计算需要清理的数据范围
-        let before = DateTime::now().0.sub(Duration::from_secs(
-            CONTEXT.config.trash_recycle_days * 24 * 3600,
-        ));
+        let trash_recycle_days = KeyValueConfig::get_value(
+            rb,
+            "system.trash_recycle_days",
+            &CONTEXT.config.trash_recycle_days.to_string(),
+        )
+        .await
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(CONTEXT.config.trash_recycle_days);
+
+        let before = DateTime::now()
+            .0
+            .sub(Duration::from_secs(trash_recycle_days * 24 * 3600));
         // 用途：删除超过保留期限的数据
         // 说明：清理旧数据，释放存储空间
-        let r = SysTrash::delete_by_day_before(pool!(), DateTime(before)).await?;
+        let r = SysTrash::delete_by_day_before(rb, DateTime(before)).await?;
         // 用途：返回删除的记录数
         // 说明：告知调用者清理结果
         Ok(r.rows_affected)
@@ -218,7 +238,7 @@ impl Intercept for SysTrashService {
             // 说明：将数据保存到回收站
             match data {
                 Value::Array(arr) => {
-                    self.add(&table, &arr).await?;
+                    self.add(rb, &table, &arr).await?;
                 }
                 _ => {
                     return Err(Error::from(format!("data={} not array", data)));

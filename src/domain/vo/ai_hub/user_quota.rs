@@ -1,3 +1,6 @@
+//! 用户配额视图对象模块。
+//! 定义 AI Hub 用户配额、配额概览与配额预警视图对象，供接口统一返回限额相关数据。
+
 // 用途：导入序列化和反序列化支持
 // 说明：用于结构体的JSON转换和数据传输
 use serde::{Deserialize, Serialize};
@@ -5,8 +8,10 @@ use serde::{Deserialize, Serialize};
 // 说明：用于自动生成API文档
 use utoipa::ToSchema;
 
-// 用途：用户配额VO结构体
+// 用途：用户配额视图对象结构体
 // 说明：用于API响应的用户配额数据
+/// 用户配额视图对象。
+/// 表示用户在指定配额类型与周期下的限额配置、当前状态与速率限制信息。
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct AiHubUserQuotaVO {
     // 用途：配额ID
@@ -37,8 +42,10 @@ pub struct AiHubUserQuotaVO {
     pub tpm_used: Option<i32>,
 }
 
-// 用途：配额概览VO结构体
+// 用途：配额概览视图对象结构体
 // 说明：用于展示用户配额的整体概览
+/// 配额概览视图对象。
+/// 表示用户当前活跃配额数量及配额明细集合。
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct QuotaOverviewVO {
     // 用途：用户ID
@@ -49,8 +56,10 @@ pub struct QuotaOverviewVO {
     pub quotas: Vec<AiHubUserQuotaVO>,
 }
 
-// 用途：配额警告VO结构体
+// 用途：配额警告视图对象结构体
 // 说明：用于展示配额警告信息
+/// 配额警告视图对象。
+/// 表示当使用率接近或超过阈值时对用户配额发出的预警信息。
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct QuotaWarningVO {
     // 用途：用户ID

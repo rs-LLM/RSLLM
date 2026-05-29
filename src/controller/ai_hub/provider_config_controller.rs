@@ -14,6 +14,14 @@ use crate::service::ai_hub::{
     CreateProviderRequest, ListProvidersRequest, ProviderConfigService, UpdateProviderRequest,
 };
 
+pub use crate::controller::ai_hub::provider::oauth_controller::{
+    complete_provider_oauth, disconnect_provider_oauth, export_provider_oauth_accounts,
+    get_provider_oauth_status, import_provider_oauth_accounts, import_provider_oauth_accounts_zip,
+    poll_provider_oauth_device, provider_oauth_public_callback,
+    provider_oauth_public_callback_by_type, refresh_provider_oauth_account_expiry,
+    refresh_provider_oauth_accounts_expiry, start_provider_oauth, update_provider_oauth_accounts,
+};
+
 /// 创建供应商
 ///
 /// 创建新的供应商配置
@@ -108,6 +116,7 @@ pub async fn get_provider_by_name(
     params(
         ("page" = i64, Query, description = "页码"),
         ("size" = i64, Query, description = "每页数量"),
+        ("provider_type" = Option<String>, Query, description = "供应商类型筛选（支持: openai / openai-compatible / codex / claude / gemini / gemini-cli / vertex / aistudio / qwen / kimi / iflow / antigravity / custom；查询时大小写不敏感并会忽略首尾空白）", example = "codex"),
         ("status" = Option<String>, Query, description = "状态筛选"),
         ("keyword" = Option<String>, Query, description = "关键词搜索")
     ),

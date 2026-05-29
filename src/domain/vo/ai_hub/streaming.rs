@@ -1,5 +1,5 @@
-//! 流式响应VO模块
-//! 提供流式响应相关的视图对象
+//! 流式响应视图对象模块。
+//! 定义 AI Hub 流式响应场景使用的响应视图对象。
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;

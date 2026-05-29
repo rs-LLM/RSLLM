@@ -5,7 +5,7 @@ use utoipa::ToSchema;
 
 use crate::context::ServiceContext;
 use crate::domain::dto::ai_hub::QueryTransactionDTO;
-use crate::domain::vo::ai_hub::TransactionVO;
+use crate::domain::vo::ai_hub::{TransactionCycleSummaryVO, TransactionVO};
 use crate::domain::vo::response::ApiResponse;
 use crate::error::ApplicationResult;
 use crate::middleware::auth_axum::JwtAuth;
@@ -15,6 +15,11 @@ use crate::service::ai_hub::TransactionService;
 pub struct TransactionListResponse {
     pub transactions: Vec<TransactionVO>,
     pub total: usize,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TransactionSummaryResponse {
+    pub summary: TransactionCycleSummaryVO,
 }
 
 /// 用途：查询交易记录列表
@@ -49,5 +54,34 @@ pub async fn list(
     Ok(Json(ApiResponse::success(TransactionListResponse {
         transactions,
         total,
+    })))
+}
+
+#[utoipa::path(
+    get,
+    path = "/ai_hub/transaction/summary",
+    responses(
+        (status = 200, description = "查询成功", body = ApiResponse<TransactionSummaryResponse>),
+        (status = 400, description = "查询失败", body = ApiResponse<TransactionSummaryResponse>),
+        (status = 401, description = "未授权", body = ApiResponse<TransactionSummaryResponse>)
+    ),
+    tag = "transaction",
+    security(
+        ("jwt_auth" = [])
+    )
+)]
+pub async fn summary(
+    State(_ctx): State<Arc<ServiceContext>>,
+    jwt_auth: JwtAuth,
+) -> ApplicationResult<Json<ApiResponse<TransactionSummaryResponse>>> {
+    let transaction_service = TransactionService {};
+    let current_user_id = jwt_auth.id.clone();
+
+    let summary = transaction_service
+        .summarize_cycle_deduct(current_user_id)
+        .await?;
+
+    Ok(Json(ApiResponse::success(TransactionSummaryResponse {
+        summary,
     })))
 }

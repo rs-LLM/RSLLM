@@ -136,6 +136,10 @@ pub async fn update_user_level(
         .user_level_service
         .update_user_level(&user_id, dto)
         .await?;
+    state
+        .rate_limit_service
+        .invalidate_user_level_cache(&user_id)
+        .await;
     Ok(Json(ApiResponse::success(
         "User level updated successfully".to_string(),
     )))
@@ -162,6 +166,7 @@ pub async fn init_user_levels(
     State(state): State<Arc<ServiceContext>>,
 ) -> Result<Json<ApiResponse<String>>> {
     state.user_level_service.init_default_levels().await?;
+    state.rate_limit_service.clear_user_level_cache().await;
     Ok(Json(ApiResponse::success(
         "User levels initialized successfully".to_string(),
     )))
@@ -230,6 +235,7 @@ pub async fn update_user_level_config(
         enabled: dto.enabled,
     };
     let level = state.user_level_service.update_level(dto_with_id).await?;
+    state.rate_limit_service.clear_user_level_cache().await;
     Ok(Json(ApiResponse::success(level)))
 }
 
@@ -257,6 +263,7 @@ pub async fn create_user_level(
     Json(dto): Json<CreateUserLevelDTO>,
 ) -> Result<Json<ApiResponse<UserLevelConfigVO>>> {
     let level = state.user_level_service.create_level(dto).await?;
+    state.rate_limit_service.clear_user_level_cache().await;
     Ok(Json(ApiResponse::success(level)))
 }
 

@@ -1,12 +1,12 @@
+//! 登录信息响应视图对象模块。
+//! 定义登录成功后返回的用户信息、权限与令牌载荷结构。
+
 // 用途：导入登录检查枚举
 // 说明：用于定义用户的登录验证方式
 use crate::domain::table::LoginCheck;
 
-// 用途：导入全局上下文实例
-// 说明：用于获取配置信息，如日期时间格式
-use crate::context::CONTEXT;
 // 用途：导入系统用户表结构
-// 说明：用于从SysUser转换为SignInVO
+// 说明：用于从SysUser转换为登录信息响应视图对象
 use crate::domain::table::sys_user::SysUser;
 // 用途：导入serde的序列化和反序列化特性
 // 说明：支持SignInVO的JSON序列化和反序列化，便于在网络中传输
@@ -15,8 +15,10 @@ use serde::{Deserialize, Serialize};
 // 说明：用于自动生成API文档
 use utoipa::ToSchema;
 
-// 用途：登录响应视图对象
+// 用途：登录信息响应视图对象
 // 说明：用于返回给客户端的登录结果，包含用户信息、权限和令牌
+/// 登录结果视图对象。
+/// 用于向客户端返回登录后的用户资料、权限与访问令牌信息。
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct SignInVO {
     // 用途：用户ID
@@ -75,7 +77,7 @@ pub struct SignInVO {
 }
 
 // 用途：实现SysUser到SignInVO的转换
-// 说明：将系统用户表结构转换为登录响应视图对象
+// 说明：将系统用户表结构转换为登录信息响应视图对象
 impl From<SysUser> for SignInVO {
     // 用途：转换方法
     // 说明：将SysUser转换为SignInVO，初始化权限、令牌和角色列表
@@ -86,15 +88,14 @@ impl From<SysUser> for SignInVO {
             name: value.name,
             login_check: value.login_check,
             state: value.state,
-            create_date: value
-                .create_date
-                .map(|v| v.format(&CONTEXT.config.datetime_format)),
+            // create_date 的格式化由 service/controller 在运行时读取 system.datetime_format 后写入。
+            create_date: None,
             permissions: vec![],
             access_token: "".to_string(),
             roles: vec![],
-            avatar: Some("/user.png".to_string()),
+            avatar: value.avatar.or(Some("/user.png".to_string())),
             desc: Some("RSLLM系统用户".to_string()),
-            home_path: Some("/home".to_string()),
+            home_path: Some("/control/home".to_string()),
             email: value.email,
             balance: value.balance,
         }

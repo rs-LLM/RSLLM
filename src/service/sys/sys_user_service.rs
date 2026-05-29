@@ -1,6 +1,7 @@
 // 用途：导入全局上下文
 // 说明：用于访问配置和其他服务
 use crate::context::CONTEXT;
+use crate::domain::table::key_value_config::KeyValueConfig;
 
 // 用途：导入自定义错误类型
 // 说明：用于处理错误情况
@@ -38,15 +39,15 @@ use crate::domain::table::LoginCheck;
 // 说明：用于数据库操作
 use crate::domain::table::sys_user::SysUser;
 
-// 用途：导入用户VO
+// 用途：导入用户视图对象
 // 说明：用于返回用户数据
 use crate::domain::vo::sys_user::SysUserVO;
 
-// 用途：导入JWT令牌和登录VO
+// 用途：导入JWT令牌和登录视图对象
 // 说明：用于处理登录和令牌相关操作
 use crate::domain::vo::{JWTToken, SignInVO};
 
-// 用途：导入设置用户VO
+// 用途：导入设置用户视图对象
 // 说明：用于设置用户角色
 use crate::service::SetUserVO;
 
@@ -93,7 +94,7 @@ impl SysUserService {
         // 说明：用于存储用户和角色的对应关系
         let mut roles = Vec::with_capacity(vo.records.len());
         // 用途：遍历用户记录
-        // 说明：为每个用户创建一个SetUserVO对象
+        // 说明：为每个用户创建一个 SetUserVO 视图对象
         for x in &vo.records {
             roles.push(SetUserVO {
                 id: x.id.clone(),
@@ -104,7 +105,7 @@ impl SysUserService {
         // 说明：为每个用户填充角色信息
         CONTEXT.rbac_user_role_service.set_roles(&mut roles).await?;
         // 用途：遍历角色列表
-        // 说明：将角色信息赋值给对应的用户VO
+        // 说明：将角色信息赋值给对应的用户视图对象
         for (idx, x) in roles.into_iter().enumerate() {
             vo.records[idx].roles = x.roles;
         }
@@ -122,9 +123,29 @@ impl SysUserService {
         // 说明：根据查询条件从数据库中获取分页数据
         let sys_user_page =
             SysUser::select_page(pool!(), &PageRequest::from(arg.clone()), &arg).await?;
-        // 用途：转换为VO分页
-        // 说明：将数据库实体转换为前端需要的VO
-        let page = Page::<SysUserVO>::from(sys_user_page);
+
+        let raw_records = sys_user_page.records.clone();
+
+        // 用途：转换为视图对象分页
+        // 说明：将数据库实体转换为前端需要的视图对象
+        let mut page = Page::<SysUserVO>::from(sys_user_page);
+
+        // 运行时生效配置：日期时间格式（DB 优先）
+        let datetime_format = KeyValueConfig::get_value(
+            pool!(),
+            "system.datetime_format",
+            &CONTEXT.config.datetime_format,
+        )
+        .await
+        .unwrap_or_else(|_| CONTEXT.config.datetime_format.clone());
+
+        for (idx, record) in page.records.iter_mut().enumerate() {
+            // 将 create_date 用 DB 配置的格式写入（从原始 sys_user_page 取 DateTime）
+            record.create_date = raw_records
+                .get(idx)
+                .and_then(|u| u.create_date.clone())
+                .map(|v| v.format(&datetime_format));
+        }
         // 用途：返回分页结果
         // 说明：告知调用者查询成功并返回数据
         Ok(page)
@@ -138,12 +159,23 @@ impl SysUserService {
         let user_id = arg.id.as_deref().unwrap_or_default();
         // 用途：查找用户
         // 说明：根据用户ID从数据库中查询用户数据
-        let user = self.find(user_id).await?.ok_or_else(|| {
+        let mut user = self.find(user_id).await?.ok_or_else(|| {
             Error::from(format!("{}={}", error_info!("user_not_exists"), user_id))
         })?;
-        // 用途：转换为用户VO
-        // 说明：将数据库实体转换为前端需要的VO
-        let mut user_vo = SysUserVO::from(user);
+
+        let datetime_format = KeyValueConfig::get_value(
+            pool!(),
+            "system.datetime_format",
+            &CONTEXT.config.datetime_format,
+        )
+        .await
+        .unwrap_or_else(|_| CONTEXT.config.datetime_format.clone());
+
+        // 用途：转换为用户视图对象
+        // 说明：将数据库实体转换为前端需要的视图对象
+        let mut user_vo = SysUserVO::from(user.clone());
+        user_vo.create_date = user.create_date.take().map(|v| v.format(&datetime_format));
+
         // 用途：获取用户角色
         // 说明：查询用户关联的角色信息
         let roles = CONTEXT
@@ -151,7 +183,7 @@ impl SysUserService {
             .find_user_role(user_id)
             .await?;
         // 用途：设置用户角色
-        // 说明：将角色信息赋值给用户VO
+        // 说明：将角色信息赋值给用户视图对象
         user_vo.roles = roles;
         // 用途：返回用户详情
         // 说明：告知调用者查询成功并返回数据
@@ -330,12 +362,18 @@ impl SysUserService {
             LoginCheck::PhoneCodeCheck => {
                 // 用途：获取短信验证码
                 // 说明：从缓存中获取之前发送的验证码
+                let conn = pool!();
+                let sms_cache_send_key_prefix = KeyValueConfig::get_value(
+                    conn,
+                    "system.sms_cache_send_key_prefix",
+                    &CONTEXT.config.sms_cache_send_key_prefix,
+                )
+                .await
+                .unwrap_or_else(|_| CONTEXT.config.sms_cache_send_key_prefix.clone());
+
                 let sms_code = CONTEXT
                     .cache_service
-                    .get_string(&format!(
-                        "{}{}",
-                        CONTEXT.config.sms_cache_send_key_prefix, &arg.username
-                    ))
+                    .get_string(&format!("{}{}", sms_cache_send_key_prefix, &arg.username))
                     .await?;
                 // 用途：检查短信验证码
                 // 说明：验证用户输入的短信验证码是否正确
@@ -361,9 +399,18 @@ impl SysUserService {
     /// 用途：检查是否需要等待登录
     /// 说明：防止登录重试频率过高
     pub async fn is_need_wait_login_ex(&self, account: &str) -> Result<()> {
-        // 用途：检查是否配置了登录重试限制
-        // 说明：只有配置了重试限制才需要检查
-        if CONTEXT.config.login_fail_retry > 0 {
+        let conn = pool!();
+        let login_fail_retry = KeyValueConfig::get_value(
+            conn,
+            "system.login_fail_retry",
+            &CONTEXT.config.login_fail_retry.to_string(),
+        )
+        .await
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(CONTEXT.config.login_fail_retry);
+
+        if login_fail_retry > 0 {
             // 用途：获取重试次数
             // 说明：从缓存中获取登录失败重试次数
             let num: Option<u64> = CONTEXT
@@ -372,7 +419,7 @@ impl SysUserService {
                 .await?;
             // 用途：检查重试次数是否超过限制
             // 说明：超过限制则需要等待
-            if num.unwrap_or(0) >= CONTEXT.config.login_fail_retry {
+            if num.unwrap_or(0) >= login_fail_retry {
                 // 用途：获取缓存剩余过期时间
                 // 说明：计算需要等待的时间
                 let wait_sec: i64 = CONTEXT
@@ -398,9 +445,31 @@ impl SysUserService {
     /// 用途：添加登录重试记录
     /// 说明：记录登录失败重试次数
     pub async fn add_retry_login_limit_num(&self, account: &str) -> Result<()> {
+        let conn = pool!();
+        let login_fail_retry = KeyValueConfig::get_value(
+            conn,
+            "system.login_fail_retry",
+            &CONTEXT.config.login_fail_retry.to_string(),
+        )
+        .await
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(CONTEXT.config.login_fail_retry);
+
+        let conn = pool!();
+        let login_fail_retry_wait_sec = KeyValueConfig::get_value(
+            conn,
+            "system.login_fail_retry_wait_sec",
+            &CONTEXT.config.login_fail_retry_wait_sec.to_string(),
+        )
+        .await
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(CONTEXT.config.login_fail_retry_wait_sec);
+
         // 用途：检查是否配置了登录重试限制
         // 说明：只有配置了重试限制才需要记录
-        if CONTEXT.config.login_fail_retry > 0 {
+        if login_fail_retry > 0 {
             // 用途：获取当前重试次数
             // 说明：从缓存中获取当前重试次数
             let num: Option<u64> = CONTEXT
@@ -410,8 +479,8 @@ impl SysUserService {
             // 用途：计算新的重试次数
             // 说明：增加重试次数，不超过配置的最大值
             let mut num = num.unwrap_or(0);
-            if num > CONTEXT.config.login_fail_retry {
-                num = CONTEXT.config.login_fail_retry;
+            if num > login_fail_retry {
+                num = login_fail_retry;
             }
             num += 1;
             // 用途：更新缓存
@@ -421,9 +490,7 @@ impl SysUserService {
                 .set_string_ex(
                     &format!("{}{}", CACHE_KEY_RETRY, account),
                     &num.to_string(),
-                    Some(Duration::from_secs(
-                        CONTEXT.config.login_fail_retry_wait_sec,
-                    )),
+                    Some(Duration::from_secs(login_fail_retry_wait_sec)),
                 )
                 .await?;
         }
@@ -433,7 +500,7 @@ impl SysUserService {
     }
 
     /// 用途：根据令牌获取用户信息
-    /// 说明：验证令牌并返回用户信息
+    /// 说明：验证访问令牌并返回用户信息
     pub async fn get_user_info_by_token(&self, token: &JWTToken) -> Result<SignInVO> {
         // 用途：根据ID查询用户
         // 说明：从数据库中获取用户信息
@@ -442,7 +509,7 @@ impl SysUserService {
             .into_iter()
             .next();
         // 用途：检查用户是否存在
-        // 说明：用户不存在则令牌无效
+        // 说明：用户不存在则访问令牌无效
         let user = user.ok_or_else(|| {
             Error::from(format!(
                 "{}:{}",
@@ -470,9 +537,19 @@ impl SysUserService {
             .id
             .clone()
             .ok_or_else(|| Error::from(error_info!("id_empty")))?;
-        // 用途：转换为登录VO
+        // 用途：转换为登录视图对象
         // 说明：生成登录响应数据
-        let mut sign_vo = SignInVO::from(user);
+        let mut sign_vo = SignInVO::from(user.clone());
+
+        // 运行时生效配置：日期时间格式（DB 优先）
+        let datetime_format = KeyValueConfig::get_value(
+            pool!(),
+            "system.datetime_format",
+            &CONTEXT.config.datetime_format,
+        )
+        .await
+        .unwrap_or_else(|_| CONTEXT.config.datetime_format.clone());
+        sign_vo.create_date = user.create_date.map(|v| v.format(&datetime_format));
         // 用途：加载用户权限
         // 说明：获取用户的所有权限
         sign_vo.permissions = self.load_level_permission(&user_id).await?;
@@ -503,7 +580,7 @@ impl SysUserService {
             .filter_map(|role| role.name)
             .filter(|role| role_set.insert(role.clone()))
             .collect();
-        // 用途：返回登录VO
+        // 用途：返回登录视图对象
         // 说明：告知调用者获取成功并返回数据
         Ok(sign_vo)
     }
@@ -686,10 +763,12 @@ impl SysUserService {
             password: Some(arg.password.clone()),
             name: Some(arg.name.clone()),
             email: Some(arg.email.clone()),
+            avatar: None,
             login_check: Some(LoginCheck::PasswordCheck),
             role_id: role_id.clone(),
             state: Some(1),
             balance: Some(0.0),
+            user_level: arg.user_level.clone(),
         };
 
         // 用途：转换为数据库实体

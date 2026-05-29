@@ -1,11 +1,11 @@
-// 用途：导入全局上下文实例
-// 说明：用于获取配置信息，如日期时间格式
-use crate::context::CONTEXT;
+//! 系统用户响应视图对象模块。
+//! 定义系统用户信息返回结构及表结构到视图对象的转换逻辑。
+
 // 用途：导入登录检查枚举
 // 说明：用于定义用户的登录验证方式
 use crate::domain::table::LoginCheck;
 // 用途：导入系统用户表结构
-// 说明：用于从SysUser转换为SysUserVO
+// 说明：用于从SysUser转换为系统用户视图对象
 use crate::domain::table::sys_user::SysUser;
 // 用途：导入系统角色视图对象
 // 说明：用于在用户视图中包含角色信息
@@ -19,6 +19,8 @@ use utoipa::ToSchema;
 
 // 用途：系统用户视图对象结构体
 // 说明：用于返回给客户端的用户信息，包含格式化后的创建时间和角色列表
+/// 系统用户视图对象。
+/// 用于向客户端返回用户基础信息与格式化后的创建时间字段。
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct SysUserVO {
     // 用途：用户ID
@@ -33,6 +35,7 @@ pub struct SysUserVO {
     // 用途：用户姓名
     // 说明：用于显示用户名称
     pub name: Option<String>,
+    pub avatar: Option<String>,
     // 用途：登录检查方式
     // 说明：定义用户登录时需要的验证方式
     #[schema(value_type = Option<String>)]
@@ -58,19 +61,18 @@ pub struct SysUserVO {
 // 说明：将数据库表结构转换为视图对象，方便返回给客户端
 impl From<SysUser> for SysUserVO {
     // 用途：转换方法
-    // 说明：将SysUser转换为SysUserVO，格式化创建时间，初始化角色列表
+    // 说明：将SysUser转换为SysUserVO，创建时间格式化由 service/controller 在运行时处理
     fn from(arg: SysUser) -> Self {
         Self {
             id: arg.id,
             account: arg.account,
             password: arg.password,
             name: arg.name,
+            avatar: arg.avatar,
             login_check: arg.login_check,
             state: arg.state,
             balance: arg.balance,
-            create_date: arg
-                .create_date
-                .map(|v| v.format(&CONTEXT.config.datetime_format)),
+            create_date: None,
             user_level: arg.user_level,
             roles: vec![],
         }

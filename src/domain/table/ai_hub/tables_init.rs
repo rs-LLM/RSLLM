@@ -13,6 +13,9 @@ use crate::domain::table::ai_hub::usage_log::AiHubUsageLog;
 // 用途：导入API密钥相关结构体
 // 说明：用于初始化API密钥表结构
 use crate::domain::table::ai_hub::api_key::ApiKey;
+use crate::domain::table::ai_hub::redeem_code::RedeemCode;
+use crate::domain::table::ai_hub::redeem_code_usage::RedeemCodeUsage;
+use crate::domain::table::ai_hub::system_status_hourly::SystemStatusHourly;
 use crate::domain::table::ai_hub::user_level_config::UserLevelConfig;
 use crate::domain::table::ai_hub::user_level_model_rate_limit::UserLevelModelRateLimit;
 // 用途：导入交易相关结构体
@@ -103,10 +106,14 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
         model_type: Default::default(),
         input_price: Default::default(),
         output_price: Default::default(),
+        price_unit: Some(Default::default()),
         currency: Some(Default::default()),
         max_tokens_per_request: Some(Default::default()),
         max_requests_per_minute: Some(Default::default()),
         description: Some(Default::default()),
+        model_category: Some(Default::default()),
+        documentation_md: Some(Default::default()),
+        documentation_options: Some(Default::default()),
         capabilities: Some(Default::default()),
         status: Some(Default::default()),
         image_token_calculation_type: Some(Default::default()),
@@ -147,6 +154,7 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
         total_tokens: Default::default(),
         input_price: Default::default(),
         output_price: Default::default(),
+        price_unit: Some(Default::default()),
         input_cost: Some(Default::default()),
         output_cost: Some(Default::default()),
         total_cost: Default::default(),
@@ -157,6 +165,12 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
         request_body: Some(Default::default()),
         status_code: Some(Default::default()),
         request_type: Some(Default::default()),
+        api: Some(Default::default()),
+        upstream_oauth_provider_id: Some(Default::default()),
+        upstream_oauth_provider_type: Some(Default::default()),
+        upstream_oauth_account_key: Some(Default::default()),
+        upstream_oauth_account_id: Some(Default::default()),
+        upstream_oauth_email: Some(Default::default()),
         status: Some(Default::default()),
         request_time: Some(Default::default()),
         response_time: Some(Default::default()),
@@ -213,6 +227,31 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
     };
     let _ = RBatis::sync(&conn, mapper, &table, "user_transaction").await;
 
+    let table = RedeemCode {
+        id: Some(Default::default()),
+        code: Default::default(),
+        amount: Default::default(),
+        status: Default::default(),
+        max_uses: Default::default(),
+        used_count: Default::default(),
+        used_by: Some(Default::default()),
+        used_at: Some(Default::default()),
+        operator_id: Some(Default::default()),
+        remark: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "redeem_code").await;
+
+    let table = RedeemCodeUsage {
+        id: Some(Default::default()),
+        code_id: Default::default(),
+        user_id: Default::default(),
+        username: Default::default(),
+        created_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "redeem_code_usage").await;
+
     let table = UserLevelModelRateLimit {
         id: Some(Default::default()),
         user_level: Default::default(),
@@ -237,6 +276,48 @@ pub async fn ai_hub_sync_tables(rb: &RBatis) {
         updated_at: Some(Default::default()),
     };
     let _ = RBatis::sync(&conn, mapper, &table, "user_level_config").await;
+
+    let table = SystemStatusHourly {
+        id: Some(Default::default()),
+        service_id: Default::default(),
+        hour_ts: Default::default(),
+        total_samples: Default::default(),
+        success_samples: Default::default(),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "system_status_hourly").await;
+
+    let _ = conn
+        .exec(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_system_status_hourly_service_hour ON system_status_hourly(service_id, hour_ts)",
+            vec![],
+        )
+        .await;
+    let _ = conn
+        .exec(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_redeem_code_usage_code_user ON redeem_code_usage(code_id, user_id)",
+            vec![],
+        )
+        .await;
+    let _ = conn
+        .exec(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_redeem_code_code ON redeem_code(code)",
+            vec![],
+        )
+        .await;
+    let _ = conn
+        .exec(
+            "CREATE INDEX IF NOT EXISTS idx_redeem_code_usage_code_id ON redeem_code_usage(code_id)",
+            vec![],
+        )
+        .await;
+    let _ = conn
+        .exec(
+            "CREATE INDEX IF NOT EXISTS idx_redeem_code_usage_user_id ON redeem_code_usage(user_id)",
+            vec![],
+        )
+        .await;
 }
 
 // 用途：初始化AI Hub默认数据

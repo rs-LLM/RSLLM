@@ -1,5 +1,4 @@
 use rbatis::crud;
-use rbatis::rbdc::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use utoipa::ToSchema;
@@ -13,6 +12,9 @@ pub struct ModelBase {
     pub model_type: String,
     pub input_price: f64,
     pub output_price: f64,
+    /// 价格单位："k"=每 1K tokens，"m"=每 1M tokens；缺失默认按 "k" 解释
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_unit: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21,6 +23,12 @@ pub struct ModelBase {
     pub max_requests_per_minute: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documentation_md: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documentation_options: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,14 +44,72 @@ pub struct ModelBase {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_tokens_per_second: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<DateTime>,
+    pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime>,
+    pub updated_at: Option<String>,
 }
 
 crud!(ModelBase {});
 
 impl ModelBase {
+    pub async fn select_ratio_page(
+        conn: &(impl rbatis::executor::Executor + ?Sized),
+        page: u64,
+        size: u64,
+    ) -> rbatis::Result<Vec<ModelBase>> {
+        let sql = "SELECT model_code, name, model_type, patch_multiplier, input_price, output_price, status FROM model_base ORDER BY model_code ASC LIMIT ? OFFSET ?";
+        conn.query(
+            sql,
+            vec![
+                rbs::Value::I64(size as i64),
+                rbs::Value::I64(((page - 1) * size) as i64),
+            ],
+        )
+        .await
+        .map(|v| {
+            v.as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|item| {
+                            let json_value = serde_json::to_value(item).unwrap_or_default();
+                            serde_json::from_value(json_value)
+                                .unwrap_or_else(|_| ModelBase::default())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    }
+
+    pub async fn select_active_ratio_page(
+        conn: &(impl rbatis::executor::Executor + ?Sized),
+        page: u64,
+        size: u64,
+    ) -> rbatis::Result<Vec<ModelBase>> {
+        let sql = "SELECT model_code, name, model_type, patch_multiplier, input_price, output_price, status FROM model_base WHERE status = 'active' ORDER BY model_code ASC LIMIT ? OFFSET ?";
+        conn.query(
+            sql,
+            vec![
+                rbs::Value::I64(size as i64),
+                rbs::Value::I64(((page - 1) * size) as i64),
+            ],
+        )
+        .await
+        .map(|v| {
+            v.as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|item| {
+                            let json_value = serde_json::to_value(item).unwrap_or_default();
+                            serde_json::from_value(json_value)
+                                .unwrap_or_else(|_| ModelBase::default())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    }
+
     pub async fn select_by_model_code(
         rb: &rbatis::RBatis,
         model_code: &str,
@@ -62,6 +128,33 @@ impl ModelBase {
                 }
                 None
             })
+    }
+
+    pub async fn select_by_model_code_or_name_case_insensitive(
+        rb: &rbatis::RBatis,
+        keyword: &str,
+    ) -> rbatis::Result<Option<ModelBase>> {
+        let normalized = keyword.trim().to_lowercase();
+        let sql = "SELECT * FROM model_base WHERE LOWER(TRIM(model_code)) = ? OR LOWER(TRIM(name)) = ? LIMIT 1";
+        rb.query(
+            sql,
+            vec![
+                rbs::Value::String(normalized.clone()),
+                rbs::Value::String(normalized),
+            ],
+        )
+        .await
+        .map(|v| {
+            if let Some(arr) = v.as_array()
+                && let Some(item) = arr.first()
+            {
+                let json_value = serde_json::to_value(item).unwrap_or_default();
+                let model =
+                    serde_json::from_value(json_value).unwrap_or_else(|_| ModelBase::default());
+                return Some(model);
+            }
+            None
+        })
     }
 
     pub async fn select_by_model_type(

@@ -20,9 +20,8 @@ Cargo.lock
 /.idea
 /.fleet
 
-
 /.vscode
-.Ds_Store
+.DS_Store
 
 .claude/
 .diea/
@@ -41,4 +40,18 @@ Cargo.lock
 
 rsllm.db**
 
+/dist/
+
 src/bin
+
+/rsllm-plugin
+/plugins
+/docs
+
+/plugins-demos
+
+/scripts
+.workflow/
+.flowpilot/
+.claude/settings.json
+.claude/worktrees/

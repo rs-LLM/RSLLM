@@ -117,6 +117,24 @@ impl ICacheService for RedisCacheService {
         };
     }
 
+    // 用途：删除缓存键
+    // 说明：从Redis缓存中移除指定键
+    async fn del(&self, k: &str) -> Result<()> {
+        let k = k.to_string();
+        let mut conn = self.get_conn().await?;
+        match redis::cmd("DEL")
+            .arg(&[k])
+            .query_async::<_, i32>(&mut conn)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(Error::from(format!(
+                "RedisService del fail:{}",
+                e.to_string()
+            ))),
+        }
+    }
+
     // 用途：设置带过期时间的字符串缓存
     // 说明：将键值对存储到Redis缓存中，并设置过期时间
     async fn set_string_ex(&self, k: &str, v: &str, ex: Option<Duration>) -> Result<String> {

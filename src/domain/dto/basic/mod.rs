@@ -1,3 +1,6 @@
+//! Basic DTO module.
+//! Exports foundational DTO submodules and common DTO types used by basic domain capabilities.
+
 // 用途：导出认证相关DTO模块
 // 说明：允许其他模块访问认证相关的DTO
 pub mod auth;
@@ -30,6 +33,14 @@ pub mod sys_organization;
 // 说明：允许其他模块访问RBAC相关的DTO
 pub mod rbac;
 
+// 用途：导出 TwoFA 相关DTO模块
+// 说明：允许其他模块访问2FA相关的DTO
+pub mod twofa;
+
+// 用途：重导出 TwoFA 相关DTO
+// 说明：方便其他模块直接使用，无需嵌套导入
+pub use twofa::*;
+
 // 用途：重导出认证相关DTO
 // 说明：方便其他模块直接使用，无需嵌套导入
 pub use auth::*;
@@ -49,6 +60,10 @@ pub use sys_dict::*;
 // 用途：重导出系统用户相关DTO
 // 说明：方便其他模块直接使用，无需嵌套导入
 pub use sys_user::*;
+
+// 用途：重导出RBAC相关DTO
+// 说明：方便其他模块直接使用，无需嵌套导入
+pub use rbac::*;
 
 // 用途：导入序列化和反序列化特性
 // 说明：用于实现DTO的序列化和反序列化

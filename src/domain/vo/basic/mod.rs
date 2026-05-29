@@ -1,3 +1,6 @@
+//! 基础领域视图对象模块。
+//! 导出基础业务响应使用的各类视图对象子模块。
+
 pub mod jwt;
 pub mod login;
 pub mod rbac;

@@ -7,6 +7,7 @@ use crate::domain::table::basic::SysUser;
 use crate::domain::vo::ai_hub::user_quota::{AiHubUserQuotaVO, QuotaOverviewVO, QuotaWarningVO};
 use crate::error::{ApplicationError, ApplicationResult};
 use crate::pool;
+use crate::service::ai_hub::UserLevelService;
 use rbatis::rbdc::DateTime;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -649,6 +650,8 @@ impl QuotaService {
 
     /// 获取用户等级配置
     pub async fn get_user_level_config(&self, user_id: &str) -> ApplicationResult<UserLevelConfig> {
+        UserLevelService::new().init_default_levels().await?;
+
         let users = SysUser::select_by_map(pool!(), rbs::value! { "id": user_id }).await?;
 
         if users.is_empty() {

@@ -53,19 +53,24 @@ impl RbacUserRoleService {
     // 用途：为用户列表设置角色信息
     // 说明：批量获取并设置用户的角色及其权限信息
     pub async fn set_roles(&self, records: &mut Vec<SetUserVO>) -> Result<()> {
+        use log::debug;
+
         // 用途：提取所有用户ID
         // 说明：用于批量查询用户角色关联
         let user_ids = rbatis::table_field_vec!(&*records, id);
+        debug!("[set_roles] 查询用户角色关联，用户IDs: {:?}", user_ids);
         // 用途：根据用户ID查询用户角色关联
         // 说明：获取用户与角色的关联关系
         let user_roles =
             RbacUserRole::select_by_map(pool!(), value! {"user_id": &user_ids}).await?;
+        debug!("[set_roles] 查询到 {} 条用户角色关联记录", user_roles.len());
         // 用途：提取所有角色ID
         // 说明：用于查询角色的权限信息
         let role_ids = rbatis::table_field_vec!(&user_roles, role_id)
             .into_iter()
             .map(|v| v.to_string())
             .collect();
+        debug!("[set_roles] 角色IDs: {:?}", role_ids);
         // 用途：构建用户ID到角色列表的映射
         // 说明：方便后续快速查询用户关联的角色
         let user_id_map = user_roles.into_map(|v| v.user_id.clone().unwrap_or_default());

@@ -15,6 +15,7 @@ use crate::domain::dto::ai_hub::api_key::{
 use crate::domain::vo::response::ApiResponse;
 use crate::error::{Error, Result};
 use crate::middleware::auth::checked_token;
+use crate::middleware::auth_axum::TOKEN_KEY;
 
 use axum::debug_handler;
 
@@ -42,8 +43,6 @@ pub async fn create_api_key(
     State(state): State<Arc<ServiceContext>>,
     Json(dto): Json<CreateApiKeyDTO>,
 ) -> Result<Json<ApiResponse<ApiKeyResponse>>> {
-    const TOKEN_KEY: &str = "Authorization";
-
     let current_user_id = if let Some(auth_header) = headers.get(TOKEN_KEY) {
         if let Ok(auth_str) = auth_header.to_str() {
             let token = auth_str.trim_start_matches("Bearer ");
@@ -93,8 +92,6 @@ pub async fn get_api_key(
     State(state): State<Arc<ServiceContext>>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<ApiKeyResponse>>> {
-    const TOKEN_KEY: &str = "Authorization";
-
     let current_user_id = if let Some(auth_header) = headers.get(TOKEN_KEY) {
         if let Ok(auth_str) = auth_header.to_str() {
             let token = auth_str.trim_start_matches("Bearer ");
@@ -148,8 +145,6 @@ pub async fn update_api_key(
     Path(id): Path<String>,
     Json(dto): Json<UpdateApiKeyDTO>,
 ) -> Result<Json<ApiResponse<ApiKeyResponse>>> {
-    const TOKEN_KEY: &str = "Authorization";
-
     let current_user_id = if let Some(auth_header) = headers.get(TOKEN_KEY) {
         if let Ok(auth_str) = auth_header.to_str() {
             let token = auth_str.trim_start_matches("Bearer ");
@@ -202,8 +197,6 @@ pub async fn delete_api_key(
     State(state): State<Arc<ServiceContext>>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<String>>> {
-    const TOKEN_KEY: &str = "Authorization";
-
     let current_user_id = if let Some(auth_header) = headers.get(TOKEN_KEY) {
         if let Ok(auth_str) = auth_header.to_str() {
             let token = auth_str.trim_start_matches("Bearer ");
@@ -257,8 +250,6 @@ pub async fn list_api_keys(
     State(state): State<Arc<ServiceContext>>,
     Query(mut params): Query<ApiKeyQueryDTO>,
 ) -> Result<Json<ApiResponse<ListApiKeysResponse>>> {
-    const TOKEN_KEY: &str = "Authorization";
-
     let current_user_id = if let Some(auth_header) = headers.get(TOKEN_KEY) {
         if let Ok(auth_str) = auth_header.to_str() {
             let token = auth_str.trim_start_matches("Bearer ");

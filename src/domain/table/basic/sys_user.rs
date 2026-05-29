@@ -30,6 +30,7 @@ pub struct SysUser {
     // 用途：用户邮箱
     // 说明：用于用户注册和找回密码，唯一标识用户身份
     pub email: Option<String>,
+    pub avatar: Option<String>,
     // 用途：登录检查方式
     // 说明：定义用户登录时需要的验证方式，如密码、验证码等
     pub login_check: Option<LoginCheck>,

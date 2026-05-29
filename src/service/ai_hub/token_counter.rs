@@ -1,7 +1,7 @@
 //! Token计数服务模块
 //!
 //! 提供多模态内容（文本、图像、音频）的token计数功能
-//! 
+//!
 //! ## 混合Tokenizer架构
 //!
 //! 本模块采用混合tokenizer架构，支持多种tokenizer类型：
@@ -23,7 +23,7 @@
 //! cargo build --features hf_tokenizers
 //! ```
 
-use crate::routers::model_router::ModelRoutingInfo;
+use crate::router::model_router::ModelRoutingInfo;
 use base64::{Engine, engine::general_purpose};
 use image::ImageReader;
 use std::collections::HashMap;
@@ -517,9 +517,14 @@ impl TokenCounter {
         let cache = HF_TOKENIZER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
         {
-            let mut cache_guard = cache.lock().expect("Failed to acquire HF tokenizer cache lock");
+            let mut cache_guard = cache
+                .lock()
+                .expect("Failed to acquire HF tokenizer cache lock");
             if !cache_guard.contains_key(model) {
-                log::info!("[TokenCounter] Loading Hugging Face tokenizer for model: {}", model);
+                log::info!(
+                    "[TokenCounter] Loading Hugging Face tokenizer for model: {}",
+                    model
+                );
 
                 // 尝试从Hugging Face Hub加载tokenizer
                 let tokenizer = Tokenizer::from_pretrained(model, None)
@@ -529,7 +534,9 @@ impl TokenCounter {
             }
         }
 
-        let cache_guard = cache.lock().expect("Failed to acquire HF tokenizer cache lock");
+        let cache_guard = cache
+            .lock()
+            .expect("Failed to acquire HF tokenizer cache lock");
         cache_guard
             .get(model)
             .cloned()
@@ -640,57 +647,62 @@ impl TokenCounter {
             return Ok(0);
         }
 
-        log::info!("[TokenCounter] Using hybrid tokenizer architecture for model: {}", model);
+        log::info!(
+            "[TokenCounter] Using hybrid tokenizer architecture for model: {}",
+            model
+        );
 
         match Self::get_tokenizer(model) {
-            Ok(tokenizer_wrapper) => {
-                match tokenizer_wrapper.tokenizer_type {
-                    TokenizerType::OpenAI => {
-                        if let Some(openai_bpe) = tokenizer_wrapper.openai_bpe {
-                            let tokens = openai_bpe.encode_with_special_tokens(text);
-                            log::info!(
-                                "[TokenCounter] OpenAI tokenizer result: {} tokens",
-                                tokens.len()
-                            );
-                            Ok(tokens.len() as i64)
-                        } else {
-                            Err("OpenAI tokenizer not available".to_string())
-                        }
+            Ok(tokenizer_wrapper) => match tokenizer_wrapper.tokenizer_type {
+                TokenizerType::OpenAI => {
+                    if let Some(openai_bpe) = tokenizer_wrapper.openai_bpe {
+                        let tokens = openai_bpe.encode_with_special_tokens(text);
+                        log::info!(
+                            "[TokenCounter] OpenAI tokenizer result: {} tokens",
+                            tokens.len()
+                        );
+                        Ok(tokens.len() as i64)
+                    } else {
+                        Err("OpenAI tokenizer not available".to_string())
                     }
-                    TokenizerType::HuggingFace => {
-                        #[cfg(feature = "hf_tokenizers")]
-                        {
-                            if let Some(hf_tokenizer) = tokenizer_wrapper.hf_tokenizer {
-                                match hf_tokenizer.encode(text, false) {
-                                    Ok(encoding) => {
-                                        let token_count = encoding.get_ids().len() as i64;
-                                        log::info!(
-                                            "[TokenCounter] Hugging Face tokenizer result: {} tokens",
-                                            token_count
-                                        );
-                                        Ok(token_count)
-                                    }
-                                    Err(e) => {
-                                        log::warn!(
-                                            "[TokenCounter] Hugging Face tokenizer encoding failed: {}, falling back to estimation",
-                                            e
-                                        );
-                                        Ok(Self::estimate_tokens(text))
-                                    }
+                }
+                TokenizerType::HuggingFace => {
+                    #[cfg(feature = "hf_tokenizers")]
+                    {
+                        if let Some(hf_tokenizer) = tokenizer_wrapper.hf_tokenizer {
+                            match hf_tokenizer.encode(text, false) {
+                                Ok(encoding) => {
+                                    let token_count = encoding.get_ids().len() as i64;
+                                    log::info!(
+                                        "[TokenCounter] Hugging Face tokenizer result: {} tokens",
+                                        token_count
+                                    );
+                                    Ok(token_count)
                                 }
-                            } else {
-                                log::warn!("[TokenCounter] Hugging Face tokenizer not available, falling back to estimation");
-                                Ok(Self::estimate_tokens(text))
+                                Err(e) => {
+                                    log::warn!(
+                                        "[TokenCounter] Hugging Face tokenizer encoding failed: {}, falling back to estimation",
+                                        e
+                                    );
+                                    Ok(Self::estimate_tokens(text))
+                                }
                             }
-                        }
-                        #[cfg(not(feature = "hf_tokenizers"))]
-                        {
-                            log::warn!("[TokenCounter] Hugging Face tokenizer feature not enabled, falling back to estimation");
+                        } else {
+                            log::warn!(
+                                "[TokenCounter] Hugging Face tokenizer not available, falling back to estimation"
+                            );
                             Ok(Self::estimate_tokens(text))
                         }
                     }
+                    #[cfg(not(feature = "hf_tokenizers"))]
+                    {
+                        log::warn!(
+                            "[TokenCounter] Hugging Face tokenizer feature not enabled, falling back to estimation"
+                        );
+                        Ok(Self::estimate_tokens(text))
+                    }
                 }
-            }
+            },
             Err(e) => {
                 log::warn!(
                     "[TokenCounter] Failed to get tokenizer for model '{}': {}, falling back to estimation",
@@ -1065,25 +1077,38 @@ mod tests {
     #[test]
     fn test_openai_tokenizer_type() {
         let openai_models = vec![
-            "gpt-4", "gpt-4-turbo", "gpt-4o", "gpt-3.5-turbo",
-            "o1-preview", "o1-mini", "text-embedding-3-small"
+            "gpt-4",
+            "gpt-4-turbo",
+            "gpt-4o",
+            "gpt-3.5-turbo",
+            "o1-preview",
+            "o1-mini",
+            "text-embedding-3-small",
         ];
         for model in openai_models {
-            let meta = TokenCounter::count_text_token("Hello, world!", model, false)
-                .expect(&format!("Failed to count tokens for OpenAI model: {}", model));
-            assert!(meta.input_tokens > 0, "OpenAI model {} should count tokens", model);
+            let meta = TokenCounter::count_text_token("Hello, world!", model, false).expect(
+                &format!("Failed to count tokens for OpenAI model: {}", model),
+            );
+            assert!(
+                meta.input_tokens > 0,
+                "OpenAI model {} should count tokens",
+                model
+            );
         }
     }
 
     #[test]
     fn test_deepseek_tokenizer_type() {
-        let deepseek_models = vec![
-            "deepseek-chat", "deepseek-coder", "deepseek-v3"
-        ];
+        let deepseek_models = vec!["deepseek-chat", "deepseek-coder", "deepseek-v3"];
         for model in deepseek_models {
-            let meta = TokenCounter::count_text_token("Hello, world!", model, false)
-                .expect(&format!("Failed to count tokens for DeepSeek model: {}", model));
-            assert!(meta.input_tokens > 0, "DeepSeek model {} should count tokens", model);
+            let meta = TokenCounter::count_text_token("Hello, world!", model, false).expect(
+                &format!("Failed to count tokens for DeepSeek model: {}", model),
+            );
+            assert!(
+                meta.input_tokens > 0,
+                "DeepSeek model {} should count tokens",
+                model
+            );
         }
     }
 
@@ -1092,7 +1117,10 @@ mod tests {
         let unknown_model = "unknown-model-v1";
         let meta = TokenCounter::count_text_token("Hello, world!", unknown_model, false)
             .expect("Failed to count tokens for unknown model (should fallback)");
-        assert!(meta.input_tokens > 0, "Fallback should estimate tokens for unknown model");
+        assert!(
+            meta.input_tokens > 0,
+            "Fallback should estimate tokens for unknown model"
+        );
     }
 
     #[test]
@@ -1105,9 +1133,14 @@ mod tests {
             ("你好，世界！", "deepseek-chat"),
         ];
         for (text, model) in texts {
-            let meta = TokenCounter::count_text_token(text, model, false)
-                .expect(&format!("Failed to count tokens for {} with model {}", text, model));
-            assert!(meta.input_tokens > 0, "Should count tokens for multilingual text");
+            let meta = TokenCounter::count_text_token(text, model, false).expect(&format!(
+                "Failed to count tokens for {} with model {}",
+                text, model
+            ));
+            assert!(
+                meta.input_tokens > 0,
+                "Should count tokens for multilingual text"
+            );
         }
     }
 }

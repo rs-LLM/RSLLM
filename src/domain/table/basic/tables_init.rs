@@ -12,13 +12,15 @@ use crate::domain::table::sys_dict::SysDict;
 use crate::domain::table::sys_trash::SysTrash;
 // 用途：导入系统用户表结构
 // 说明：用于同步系统用户表结构和初始化管理员用户
-use crate::domain::table::sys_user::SysUser;
-// 用途：导入键值配置表结构
-// 说明：用于同步键值配置表结构和初始化配置
-use crate::domain::table::key_value_config::KeyValueConfig;
-// 用途：导入初始化事务日志表结构
-// 说明：用于同步初始化事务日志表结构
 use crate::domain::table::init_transaction_log::InitTransactionLog;
+use crate::domain::table::invitation_code::InvitationCode;
+use crate::domain::table::key_value_config::KeyValueConfig;
+use crate::domain::table::official_announcement::OfficialAnnouncement;
+use crate::domain::table::registration_review::RegistrationReview;
+use crate::domain::table::sys_user::SysUser;
+use crate::domain::table::twofa_backup_code::TwoFaBackupCode;
+use crate::domain::table::twofa_login_challenge::TwoFaLoginChallenge;
+use crate::domain::table::twofa_profile::TwoFaProfile;
 // 用途：导入日志级别枚举
 // 说明：用于控制日志输出级别
 use log::LevelFilter;
@@ -70,9 +72,7 @@ struct RoleItem {
     // 用途：角色名称
     name: String,
     // 用途：角色描述
-    // 说明：保留用于未来扩展，当前未使用
     #[serde(default)]
-    #[allow(dead_code)]
     description: Option<String>,
     // 用途：权限列表
     // 说明：* 表示所有权限
@@ -167,6 +167,7 @@ pub async fn sys_sync_tables(rb: &RBatis) {
         password: Some(Default::default()),
         name: Some(Default::default()),
         email: Some(Default::default()),
+        avatar: Some(Default::default()),
         login_check: Some(Default::default()),
         state: Some(Default::default()),
         create_date: Some(Default::default()),
@@ -175,8 +176,53 @@ pub async fn sys_sync_tables(rb: &RBatis) {
     };
     let _ = RBatis::sync(&conn, mapper, &table, "sys_user").await;
 
-    // 用途：同步系统字典表结构
-    // 说明：存储系统配置的字典数据
+    let table = TwoFaProfile {
+        id: Some(Default::default()),
+        user_id: Some(Default::default()),
+        secret: Some(Default::default()),
+        enabled: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "twofa_profile").await;
+
+    let table = TwoFaBackupCode {
+        id: Some(Default::default()),
+        user_id: Some(Default::default()),
+        code_hash: Some(Default::default()),
+        used_at: Some(Default::default()),
+        created_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "twofa_backup_code").await;
+
+    let table = TwoFaLoginChallenge {
+        id: Some(Default::default()),
+        user_id: Some(Default::default()),
+        account: Some(Default::default()),
+        expires_at: Some(Default::default()),
+        created_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "twofa_login_challenge").await;
+
+    let _ = conn
+        .exec(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_twofa_profile_user_id ON twofa_profile(user_id)",
+            vec![],
+        )
+        .await;
+    let _ = conn
+        .exec(
+            "CREATE INDEX IF NOT EXISTS idx_twofa_backup_code_user_id ON twofa_backup_code(user_id)",
+            vec![],
+        )
+        .await;
+    let _ = conn
+        .exec(
+            "CREATE INDEX IF NOT EXISTS idx_twofa_login_challenge_account ON twofa_login_challenge(account)",
+            vec![],
+        )
+        .await;
+
     let table = SysDict {
         id: Some(Default::default()),
         name: Some(Default::default()),
@@ -206,6 +252,59 @@ pub async fn sys_sync_tables(rb: &RBatis) {
         description: None,
     };
     let _ = RBatis::sync(&conn, mapper, &table, "key_value_config").await;
+
+    let table = OfficialAnnouncement {
+        id: Default::default(),
+        title: Default::default(),
+        summary: Default::default(),
+        content: Default::default(),
+        enabled: 1,
+        popup: 0,
+        sort_order: 0,
+        created_at: None,
+        updated_at: None,
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "official_announcement").await;
+
+    let table = InvitationCode {
+        id: Some(Default::default()),
+        code: Default::default(),
+        status: Default::default(),
+        max_uses: Default::default(),
+        used_count: Default::default(),
+        user_level: Some(Default::default()),
+        operator_id: Some(Default::default()),
+        remark: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "invitation_code").await;
+
+    let _ = conn
+        .exec(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_invitation_code_code ON invitation_code(code)",
+            vec![],
+        )
+        .await;
+
+    let table = RegistrationReview {
+        id: Some(Default::default()),
+        name: Default::default(),
+        email: Default::default(),
+        password: Default::default(),
+        agree_terms: Default::default(),
+        invite_code: Some(Default::default()),
+        user_level: Some(Default::default()),
+        apply_reason: Some(Default::default()),
+        status: Default::default(),
+        review_note: Some(Default::default()),
+        notify_on_reject: Default::default(),
+        reviewed_by: Some(Default::default()),
+        reviewed_at: Some(Default::default()),
+        created_at: Some(Default::default()),
+        updated_at: Some(Default::default()),
+    };
+    let _ = RBatis::sync(&conn, mapper, &table, "registration_review").await;
 
     // 用途：同步初始化事务日志表结构
     // 说明：用于同步初始化事务日志表结构
@@ -304,6 +403,13 @@ pub async fn sys_sync_tables_data(rb: &RBatis) {
     // 用途：创建默认角色并分配权限
     // 说明：遍历配置文件中的所有角色定义
     for role_config in permission_config.default_roles {
+        let role_description = role_config.description.as_deref().unwrap_or("");
+        log::debug!(
+            "初始化角色: {}, 描述: {}",
+            role_config.name,
+            role_description
+        );
+
         // 用途：检查角色是否已存在
         // 说明：如果不存在则创建
         let role_id = if let Ok(v) =
@@ -412,10 +518,11 @@ fn load_permission_config() -> PermissionConfig {
     // 用途：读取配置文件内容
     // 说明：从默认路径读取权限配置
     let config_path = "config/default_permissions.json5";
-    
+
     if !std::path::Path::new(config_path).exists() {
         let default_config = get_default_permission_config();
-        let config_str = json5::to_string(&default_config).expect("serialize permission config fail");
+        let config_str =
+            json5::to_string(&default_config).expect("serialize permission config fail");
         std::fs::create_dir_all("config").unwrap_or_else(|e| {
             eprintln!("警告：创建config目录失败: {}", e);
         });
@@ -617,7 +724,7 @@ fn get_default_permission_config() -> PermissionConfig {
             },
             PermissionItem {
                 name: "模型管理".to_string(),
-                permission: "sys:model:view".to_string(),
+                permission: "ai:model:view".to_string(),
                 path: Some("/ai/model".to_string()),
                 permission_type: Some("menu".to_string()),
                 description: Some("查看模型管理页面".to_string()),
@@ -627,7 +734,7 @@ fn get_default_permission_config() -> PermissionConfig {
             },
             PermissionItem {
                 name: "模型编辑".to_string(),
-                permission: "sys:model:edit".to_string(),
+                permission: "ai:model:edit".to_string(),
                 path: Some("/admin/model_update".to_string()),
                 permission_type: Some("button".to_string()),
                 description: Some("编辑模型配置".to_string()),
@@ -637,7 +744,7 @@ fn get_default_permission_config() -> PermissionConfig {
             },
             PermissionItem {
                 name: "提供商编辑".to_string(),
-                permission: "sys:provider:edit".to_string(),
+                permission: "ai:provider:edit".to_string(),
                 path: Some("/admin/provider_update".to_string()),
                 permission_type: Some("button".to_string()),
                 description: Some("编辑提供商配置".to_string()),
@@ -702,6 +809,16 @@ fn get_default_permission_config() -> PermissionConfig {
                 permission_type: Some("button".to_string()),
                 description: Some("管理余额".to_string()),
                 sort_order: Some(22),
+                icon: None,
+                status: 1,
+            },
+            PermissionItem {
+                name: "订阅管理".to_string(),
+                permission: "manage_subscription".to_string(),
+                path: Some("/admin/subscription".to_string()),
+                permission_type: Some("button".to_string()),
+                description: Some("管理订阅套餐与支付配置".to_string()),
+                sort_order: Some(23),
                 icon: None,
                 status: 1,
             },

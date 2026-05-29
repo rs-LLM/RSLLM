@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 // 用途：导入全局上下文
 // 说明：用于访问缓存服务和配置信息
 use crate::context::CONTEXT;
@@ -72,13 +74,13 @@ pub async fn captcha(arg: Query<CatpchaDTO>) -> impl IntoResponse {
     let (png, code) = make();
     // 用途：检查是否为调试模式
     // 说明：调试模式下输出验证码日志，方便调试
+    // 注意：不要打印真实验证码，避免泄露
     if CONTEXT.config.debug() {
         // 用途：输出验证码日志
-        // 说明：记录账号和对应的验证码，便于调试
+        // 说明：记录账号，便于调试
         log::info!(
-            "account:{},captcha:{}",
-            arg.account.as_deref().unwrap_or_default(),
-            code
+            "captcha_generated account:{}",
+            arg.account.as_deref().unwrap_or_default()
         );
     }
     // 用途：检查账号是否存在
@@ -88,7 +90,7 @@ pub async fn captcha(arg: Query<CatpchaDTO>) -> impl IntoResponse {
         // 说明：用于后续验证用户输入的验证码是否正确
         let result = CONTEXT
             .cache_service
-            .set_string(
+            .set_string_ex(
                 // 用途：构建缓存键
                 // 说明：使用账号作为缓存键的一部分，确保每个账号的验证码唯一
                 &format!(
@@ -96,11 +98,9 @@ pub async fn captcha(arg: Query<CatpchaDTO>) -> impl IntoResponse {
                     arg.account.as_deref().unwrap_or_default()
                 ),
                 code.as_str(),
+                Some(Duration::from_secs(300)),
             )
             .await;
-        // 用途：输出缓存结果
-        // 说明：调试时查看缓存操作结果
-        println!("{:?}", result);
         // 用途：检查是否为发布模式
         // 说明：发布模式下需要处理缓存错误
         if !CONTEXT.config.debug() {

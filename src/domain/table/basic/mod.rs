@@ -1,3 +1,6 @@
+//! Basic table module.
+//! Exports foundational system table models, enums, and table initialization entries.
+
 // 用途：导入枚举模块
 // 说明：包含系统中使用的枚举类型，如LoginCheck
 mod enums;
@@ -22,9 +25,15 @@ pub use system_config::*;
 // 用途：导出键值配置表结构
 // 说明：用于灵活的键值对配置存储
 pub mod key_value_config;
+pub mod official_announcement;
 // 用途：导出键值配置表结构
 // 说明：方便其他模块直接使用键值配置表结构
 pub use key_value_config::*;
+pub use official_announcement::*;
+pub mod invitation_code;
+pub use invitation_code::*;
+pub mod registration_review;
+pub use registration_review::*;
 // 用途：导出初始化事务日志表结构
 // 说明：用于记录初始化事务执行日志
 pub mod init_transaction_log;
@@ -55,6 +64,16 @@ pub mod sys_organization;
 // 用途：导出系统组织表结构
 // 说明：方便其他模块直接使用组织表结构
 pub use sys_organization::*;
+
+// 用途：导出 TwoFA 相关表结构
+// 说明：包含2FA配置、备用码和登录challenge
+pub mod twofa_profile;
+pub use twofa_profile::*;
+pub mod twofa_backup_code;
+pub use twofa_backup_code::*;
+pub mod twofa_login_challenge;
+pub use twofa_login_challenge::*;
+
 // 用途：导入表初始化模块
 // 说明：负责初始化数据库表结构
 mod tables_init;

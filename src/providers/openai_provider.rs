@@ -6,6 +6,7 @@ use serde_json::json;
 use std::time::Duration;
 
 use crate::error::{Error, Result};
+use crate::middleware::auth_axum::TOKEN_KEY;
 use crate::service::ai_hub::ProviderConfig;
 use crate::service::ai_hub::provider_trait::{
     AIProvider, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, Choice,
@@ -24,9 +25,16 @@ impl OpenAIProvider {
     pub fn new(config: ProviderConfig) -> Result<Self> {
         let timeout = Duration::from_secs(config.timeout_seconds.unwrap_or(30));
 
-        let client = Client::builder().timeout(timeout).build().map_err(|e| {
-            Error::ExternalServiceError(format!("Failed to create HTTP client: {}", e))
-        })?;
+        let client = Client::builder()
+            .timeout(timeout)
+            .connect_timeout(Duration::from_secs(8))
+            .tcp_nodelay(true)
+            .pool_max_idle_per_host(16)
+            .pool_idle_timeout(Duration::from_secs(90))
+            .build()
+            .map_err(|e| {
+                Error::ExternalServiceError(format!("Failed to create HTTP client: {}", e))
+            })?;
 
         Ok(Self {
             client,
@@ -294,6 +302,16 @@ impl OpenAIProvider {
             usage,
         })
     }
+
+    fn resolve_models_endpoint(&self) -> String {
+        let trimmed = self.api_base.trim_end_matches('/');
+        let lowered = trimmed.to_ascii_lowercase();
+        if lowered.contains("api.openai.com") && !trimmed.ends_with("/v1") {
+            return format!("{trimmed}/v1/models");
+        }
+
+        format!("{trimmed}/models")
+    }
 }
 
 #[async_trait]
@@ -308,7 +326,7 @@ impl AIProvider for OpenAIProvider {
         let response = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header(TOKEN_KEY, format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&request_body)
             .send()
@@ -341,7 +359,7 @@ impl AIProvider for OpenAIProvider {
         let response = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header(TOKEN_KEY, format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&request_body)
             .send()
@@ -374,7 +392,7 @@ impl AIProvider for OpenAIProvider {
         let response = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header(TOKEN_KEY, format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&request_body)
             .send()
@@ -411,7 +429,7 @@ impl AIProvider for OpenAIProvider {
         let response = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header(TOKEN_KEY, format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream")
             .json(&request_body)
@@ -437,12 +455,12 @@ impl AIProvider for OpenAIProvider {
     }
 
     async fn health_check(&self) -> Result<bool> {
-        let url = format!("{}/models", self.api_base);
+        let url = self.resolve_models_endpoint();
 
         let response = self
             .client
             .get(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header(TOKEN_KEY, format!("Bearer {}", self.api_key))
             .send()
             .await
             .map_err(|e| Error::ExternalServiceError(format!("Health check failed: {}", e)))?;

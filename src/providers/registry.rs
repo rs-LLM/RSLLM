@@ -6,8 +6,11 @@ use std::sync::Arc;
 
 use crate::domain::dto::ProviderConfig;
 use crate::domain::table::ai_hub::provider_config::ProviderConfig as DbProviderConfig;
-use crate::providers::common::CommonProvider;
 use crate::providers::provider::Provider;
+use crate::providers::{
+    aistudio, antigravity, claude, codex, custom, gemini, gemini_cli, iflow, kimi, openai,
+    openai_compatible, qwen, vertex,
+};
 
 /// 供应商注册表，用于管理和注册所有AI服务供应商
 ///
@@ -58,7 +61,19 @@ impl ProviderRegistry {
         );
 
         for provider in providers {
-            let provider_config = ProviderConfig::from(provider);
+            let provider_config = match ProviderConfig::try_from(provider) {
+                Ok(config) => config,
+                Err(err) => {
+                    log::error!(
+                        "[ProviderRegistry] Skipping provider with invalid provider_type: code={}, name={}, provider_type={}, reason={}",
+                        provider.provider_code,
+                        provider.name,
+                        provider.provider_type,
+                        err
+                    );
+                    continue;
+                }
+            };
 
             let provider_code = provider_config.provider_code.clone();
             let provider_name = provider_config.name.clone();
@@ -163,14 +178,91 @@ impl ProviderRegistry {
     ) -> Option<Arc<dyn Provider>> {
         let provider: Arc<dyn Provider> = match config.provider_type {
             crate::domain::dto::ProviderType::OpenAI => {
-                let mut p = CommonProvider::new(config);
+                let mut p = openai::provider::build(config);
                 if let Some(key) = decrypted_api_key {
                     p.set_decrypted_api_key(key);
                 }
                 Arc::new(p)
             }
             crate::domain::dto::ProviderType::OpenAICompatible => {
-                let mut p = CommonProvider::new(config);
+                let mut p = openai_compatible::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::Codex => {
+                let mut p = codex::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::Claude => {
+                let mut p = claude::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::Gemini => {
+                let mut p = gemini::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::GeminiCli => {
+                let mut p = gemini_cli::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::Vertex => {
+                let mut p = vertex::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::AiStudio => {
+                let mut p = aistudio::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::Qwen => {
+                let mut p = qwen::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::Kimi => {
+                let mut p = kimi::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::Iflow => {
+                let mut p = iflow::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::Antigravity => {
+                let mut p = antigravity::provider::build(config);
+                if let Some(key) = decrypted_api_key {
+                    p.set_decrypted_api_key(key);
+                }
+                Arc::new(p)
+            }
+            crate::domain::dto::ProviderType::Custom => {
+                let mut p = custom::provider::build(config);
                 if let Some(key) = decrypted_api_key {
                     p.set_decrypted_api_key(key);
                 }
@@ -311,5 +403,104 @@ impl ProviderRegistry {
     /// 已注册供应商的数量
     pub fn provider_count(&self) -> usize {
         self.providers.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProviderRegistry;
+    use crate::domain::table::ai_hub::provider_config::ProviderConfig as DbProviderConfig;
+
+    fn build_db_provider(provider_code: &str, provider_type: &str) -> DbProviderConfig {
+        DbProviderConfig {
+            id: Some(format!("id-{}", provider_code)),
+            provider_code: provider_code.to_string(),
+            name: format!("{}-name", provider_code),
+            provider_type: provider_type.to_string(),
+            api_base: "https://example.com/v1".to_string(),
+            api_key_encrypted: None,
+            auth_config: None,
+            circuit_breaker_enabled: None,
+            failure_threshold: None,
+            status: Some("active".to_string()),
+            description: None,
+            documentation_url: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn from_db_should_skip_invalid_provider_type() {
+        let providers = vec![
+            build_db_provider("valid-custom", "custom"),
+            build_db_provider("invalid", "unknown-provider"),
+        ];
+
+        let registry = ProviderRegistry::from_db(&providers);
+
+        assert!(registry.contains_provider("valid-custom"));
+        assert!(!registry.contains_provider("invalid"));
+        assert_eq!(registry.provider_count(), 1);
+    }
+
+    #[test]
+    fn from_db_should_accept_all_new_provider_types() {
+        let new_types = [
+            ("claude-provider", "claude"),
+            ("gemini-provider", "gemini"),
+            ("gemini-cli-provider", "gemini-cli"),
+            ("vertex-provider", "vertex"),
+            ("aistudio-provider", "aistudio"),
+            ("qwen-provider", "qwen"),
+            ("kimi-provider", "kimi"),
+            ("iflow-provider", "iflow"),
+            ("antigravity-provider", "antigravity"),
+        ];
+        let providers: Vec<_> = new_types
+            .iter()
+            .map(|(code, ptype)| build_db_provider(code, ptype))
+            .collect();
+
+        let registry = ProviderRegistry::from_db(&providers);
+
+        for (code, _) in new_types {
+            assert!(
+                registry.contains_provider(code),
+                "{} should be registered",
+                code
+            );
+        }
+        assert_eq!(registry.provider_count(), new_types.len());
+    }
+
+    #[test]
+    fn from_db_should_accept_case_insensitive_provider_type() {
+        let providers = vec![build_db_provider("mixed-case", "OpenAI-Compatible")];
+
+        let registry = ProviderRegistry::from_db(&providers);
+
+        assert!(registry.contains_provider("mixed-case"));
+        assert_eq!(registry.provider_count(), 1);
+    }
+
+    #[test]
+    fn from_db_should_accept_provider_type_with_surrounded_whitespace() {
+        let providers = vec![build_db_provider("trimmed", "  OpenAI-Compatible  ")];
+
+        let registry = ProviderRegistry::from_db(&providers);
+
+        assert!(registry.contains_provider("trimmed"));
+        assert_eq!(registry.provider_count(), 1);
+    }
+
+    #[test]
+    fn from_db_should_accept_codex_provider_type() {
+        let providers = vec![build_db_provider("codex-provider", "CoDeX")];
+
+        let registry = ProviderRegistry::from_db(&providers);
+
+        assert!(registry.contains_provider("codex-provider"));
+        assert_eq!(registry.provider_count(), 1);
     }
 }

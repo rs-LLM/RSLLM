@@ -38,6 +38,8 @@ pub mod provider_trait;
 // 原因：管理AI服务提供商的创建和配置
 pub mod provider_factory;
 
+pub mod provider;
+
 // 用途：声明供应商配置服务模块
 // 原因：管理AI服务供应商的配置和生命周期
 mod provider_config_service;
@@ -62,6 +64,9 @@ mod user_level_model_rate_limit_service;
 // 原因：处理API密钥管理相关业务逻辑
 mod api_key_service;
 
+mod redeem_code_service;
+mod request_context;
+
 // 用途：声明速率限制服务模块
 // 原因：处理RPM/TPM速率限制相关业务逻辑
 pub mod rate_limit_service;
@@ -76,6 +81,7 @@ pub use billing_service::CalculateAndCheckParams;
 pub use billing_service::CalculatedFee;
 pub use billing_service::ListUsageLogsParams;
 pub use billing_service::QuickBillParams;
+pub use billing_service::UsageLogMeta;
 pub use billing_service::*;
 
 // 用途：导出用量记录服务
@@ -126,6 +132,9 @@ pub use user_level_model_rate_limit_service::*;
 // 原因：允许其他模块访问API密钥管理功能
 pub use api_key_service::*;
 
+pub use redeem_code_service::*;
+pub use request_context::*;
+
 // 用途：导出速率限制服务
 // 原因：允许其他模块访问速率限制功能
 pub use rate_limit_service::*;
@@ -159,6 +168,7 @@ pub use crate::domain::dto::ai_hub::embeddings::*;
 pub use crate::domain::dto::ai_hub::logprob::*;
 // 明确导出DTO streaming类型，避免与VO冲突
 pub use crate::domain::dto::ai_hub::analytics::*;
+pub use crate::domain::dto::ai_hub::redeem_code::*;
 pub use crate::domain::dto::ai_hub::streaming::{
     ChatCompletionChunk as DtoChatCompletionChunk,
     ChatCompletionChunkChoice as DtoChatCompletionChunkChoice,

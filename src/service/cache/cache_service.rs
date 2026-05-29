@@ -45,6 +45,10 @@ pub trait ICacheService: Sync + Send + Debug {
     /// 说明：从缓存中获取字符串值
     async fn get_string(&self, k: &str) -> Result<String>;
 
+    /// 用途：删除缓存键
+    /// 说明：从缓存中移除指定键
+    async fn del(&self, k: &str) -> Result<()>;
+
     /// 用途：设置带过期时间的字符串键值对
     /// 说明：存储具有生命周期的缓存数据
     async fn set_string_ex(&self, k: &str, v: &str, ex: Option<Duration>) -> Result<String>;
@@ -120,6 +124,12 @@ impl CacheService {
         // 用途：调用内部缓存服务获取字符串
         // 说明：委托给具体的缓存实现
         self.inner.get_string(k).await
+    }
+
+    /// 用途：删除缓存键
+    /// 说明：从缓存中移除指定键
+    pub async fn del(&self, k: &str) -> Result<()> {
+        self.inner.del(k).await
     }
 
     /// 用途：设置JSON键值对

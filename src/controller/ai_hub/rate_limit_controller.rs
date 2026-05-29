@@ -12,6 +12,7 @@ use crate::context::ServiceContext;
 use crate::domain::vo::response::ApiResponse;
 use crate::error::{Error, Result};
 use crate::middleware::auth::checked_token;
+use crate::middleware::auth_axum::TOKEN_KEY;
 use crate::service::ai_hub::RateLimitCheckResult;
 
 use axum::debug_handler;
@@ -210,8 +211,6 @@ pub async fn get_current_user_rate_limit(
     headers: HeaderMap,
     State(state): State<Arc<ServiceContext>>,
 ) -> Result<Json<ApiResponse<RateLimitStatusResponse>>> {
-    const TOKEN_KEY: &str = "Authorization";
-
     let user_id = if let Some(auth_header) = headers.get(TOKEN_KEY) {
         if let Ok(auth_str) = auth_header.to_str() {
             let token = auth_str.trim_start_matches("Bearer ");

@@ -3,8 +3,13 @@
 //! 该模块定义静态文件服务，用于提供前端页面和静态资源访问
 
 use crate::context::ServiceContext;
-use axum::{body::Body, extract::Request, response::{IntoResponse, Response}, Router};
-use include_dir::{include_dir, Dir};
+use axum::{
+    Router,
+    body::Body,
+    extract::Request,
+    response::{IntoResponse, Response},
+};
+use include_dir::{Dir, include_dir};
 use std::sync::Arc;
 
 // 嵌入 dist 目录到二进制文件中
@@ -14,9 +19,7 @@ static DIST_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/dist");
 ///
 /// 返回静态文件服务配置，支持SPA应用
 pub fn create_resource_router() -> Router<Arc<ServiceContext>> {
-    Router::new().fallback_service(
-        axum::routing::get(serve_static),
-    )
+    Router::new().fallback_service(axum::routing::get(serve_static))
 }
 
 /// 服务静态文件
@@ -37,7 +40,11 @@ async fn serve_static(req: Request) -> Response {
             .unwrap()
             .into_response()
     } else {
-        Response::builder().status(404).body(Body::empty()).unwrap().into_response()
+        Response::builder()
+            .status(404)
+            .body(Body::empty())
+            .unwrap()
+            .into_response()
     }
 }
 
@@ -51,6 +58,10 @@ fn serve_file(path: &str) -> Response {
             .unwrap()
             .into_response()
     } else {
-        Response::builder().status(404).body(Body::empty()).unwrap().into_response()
+        Response::builder()
+            .status(404)
+            .body(Body::empty())
+            .unwrap()
+            .into_response()
     }
 }

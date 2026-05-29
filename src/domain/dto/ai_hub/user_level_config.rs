@@ -1,5 +1,4 @@
 //! 用户等级配置相关 DTO
-use rbatis::rbdc::DateTime;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -27,8 +26,19 @@ pub struct UpdateUserLevelConfigDTO {
     pub enabled: Option<i32>,
 }
 
-/// 用户等级配置 VO
+/// 用户等级配置视图对象
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "id": "123",
+    "level": "vip",
+    "level_name": "VIP用户",
+    "description": "VIP用户等级",
+    "rpm_limit": 100,
+    "tpm_limit": 1000,
+    "enabled": 1,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z"
+}))]
 pub struct UserLevelConfigVO {
     pub id: String,
     pub level: String,
@@ -37,11 +47,11 @@ pub struct UserLevelConfigVO {
     pub rpm_limit: i32,
     pub tpm_limit: i32,
     pub enabled: i32,
-    pub created_at: DateTime,
-    pub updated_at: DateTime,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
-/// 用户等级详情 VO（包含模型限制）
+/// 用户等级详情视图对象（包含模型限制）
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserLevelDetailVO {
     pub config: UserLevelConfigVO,
@@ -86,7 +96,7 @@ pub struct BatchDeleteUserLevelsDTO {
     pub ids: Vec<String>,
 }
 
-/// 当前用户等级信息 VO（用于前端显示）
+/// 当前用户等级信息视图对象（用于前端显示）
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserLevelVO {
     pub level: i32,

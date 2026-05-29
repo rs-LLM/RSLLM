@@ -2,6 +2,7 @@
 //! 提供SSE和WebSocket流式响应接口
 
 use axum::{
+    Extension,
     extract::ws::WebSocket,
     extract::{State, WebSocketUpgrade},
     http::HeaderMap,
@@ -14,6 +15,7 @@ use ulid::Ulid;
 
 // 导入相关类型
 use crate::context::ServiceContext;
+use crate::controller::ai_hub;
 use crate::domain::dto::ai_hub::chat::ChatCompletionRequest;
 use crate::domain::dto::ai_hub::content::{ChatCompletionMessage, ChatMessageContent};
 use crate::domain::vo::ai_hub::streaming::{
@@ -21,6 +23,7 @@ use crate::domain::vo::ai_hub::streaming::{
     WebSocketChatRequest, WebSocketMessageType,
 };
 use crate::service::ai_hub::rate_limit_service::RateLimitCheckResult;
+use crate::service::ai_hub::{AiRequestContext, resolve_request_identity};
 use crate::service::{Content, TokenCountMeta, TokenCounter};
 
 /// WebSocket聊天补全接口
@@ -44,9 +47,17 @@ pub async fn chat_completions_ws(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
     State(state): State<Arc<ServiceContext>>,
+    request_context: Option<Extension<AiRequestContext>>,
 ) -> impl IntoResponse {
+    let (ip_address, user_agent) = ai_hub::extract_client_meta(&headers);
     // 用户认证
-    let (user_id, api_key) = match authenticate_user(&headers, &state).await {
+    let (user_id, api_key) = match authenticate_user(
+        &headers,
+        &state,
+        request_context.as_ref().map(|context| &context.0),
+    )
+    .await
+    {
         Ok((id, key)) => (id, key),
         Err(e) => {
             return ws.on_upgrade(|mut socket| async move {
@@ -88,6 +99,8 @@ pub async fn chat_completions_ws(
                             &request_id,
                             &user_id,
                             &api_key,
+                            ip_address.clone(),
+                            user_agent.clone(),
                             &state,
                             &model_router,
                             &mut socket,
@@ -118,8 +131,10 @@ async fn handle_ws_chat_request(
     request_id: &str,
     user_id: &str,
     api_key: &str,
+    ip_address: Option<String>,
+    user_agent: Option<String>,
     state: &Arc<ServiceContext>,
-    model_router: &crate::routers::model_router::ModelRouter,
+    model_router: &crate::router::model_router::ModelRouter,
     socket: &mut WebSocket,
 ) {
     let start_time = std::time::Instant::now();
@@ -181,7 +196,7 @@ async fn handle_ws_chat_request(
     let input_tokens_i32 = token_meta.input_tokens as i32;
     let rate_limit_result = state
         .rate_limit_service
-        .check_quota_with_tokens(user_id, input_tokens_i32)
+        .precheck_request_tokens(user_id, input_tokens_i32)
         .await;
     match rate_limit_result {
         Ok(RateLimitCheckResult { allowed: true, .. }) => {
@@ -347,7 +362,7 @@ async fn handle_ws_chat_request(
         if output_tokens > 0 {
             if let Err(e) = state
                 .rate_limit_service
-                .consume_tokens(user_id, output_tokens as i32)
+                .settle_output_tokens(user_id, output_tokens as i32)
                 .await
             {
                 log::error!("[AI Hub] Failed to consume output tokens: {}", e);
@@ -400,18 +415,20 @@ async fn handle_ws_chat_request(
     }
 
     // 记录用量
-    let duration_ms = start_time.elapsed().as_millis() as i64;
+    let _duration_ms = start_time.elapsed().as_millis() as i64;
+    let meta =
+        crate::service::ai_hub::UsageLogMeta::chat_ws(ip_address.clone(), user_agent.clone());
+
     let _ = billing_service
         .deduct_quota_and_log(
             &fee,
-            &api_key,
-            duration_ms,
-            "success",
+            &meta,
             Some(serde_json::json!({
                 "model": req.model,
                 "stream": req.stream.unwrap_or(false),
                 "protocol": "websocket",
             })),
+            None,
         )
         .await;
 }
@@ -420,36 +437,16 @@ async fn handle_ws_chat_request(
 async fn authenticate_user(
     headers: &HeaderMap,
     state: &Arc<ServiceContext>,
+    request_context: Option<&AiRequestContext>,
 ) -> Result<(String, String), String> {
-    let token = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .ok_or_else(|| "Missing or invalid authorization header".to_string())?;
-
-    let validation_result = state
-        .api_key_service
-        .validate_api_key(token)
-        .await
-        .map_err(|e| format!("API key validation failed: {}", e))?;
-
-    if !validation_result.valid {
-        return Err(validation_result
-            .error
-            .unwrap_or_else(|| "Invalid API key".to_string()));
-    }
-
-    let user_id = validation_result
-        .user_id
-        .ok_or_else(|| "User ID not found".to_string())?;
-
-    Ok((user_id, token.to_string()))
+    let identity = resolve_request_identity(headers, state, request_context).await?;
+    Ok((identity.user_id, identity.api_key))
 }
 
 /// 计算token数量
 async fn calculate_tokens(
     req: &ChatCompletionRequest,
-    model_router: &crate::routers::model_router::ModelRouter,
+    model_router: &crate::router::model_router::ModelRouter,
 ) -> Result<TokenCountMeta, String> {
     let mut total_meta = TokenCountMeta::default();
 
@@ -499,7 +496,7 @@ async fn calculate_tokens(
 /// 获取模型定价
 async fn get_pricing(
     model: &str,
-    model_router: &crate::routers::model_router::ModelRouter,
+    model_router: &crate::router::model_router::ModelRouter,
 ) -> (f64, f64) {
     match model_router.route_to_model(model).await {
         Ok(model_def) => {

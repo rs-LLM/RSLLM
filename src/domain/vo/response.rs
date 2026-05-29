@@ -1,5 +1,5 @@
-// 用途：统一响应类型定义
-// 说明：提供标准化的API响应格式，用于前后端接口对接
+//! 统一响应视图对象模块。
+//! 提供标准化的 API 响应格式，用于前后端接口对接。
 
 // 用途：导入序列化支持
 // 说明：用于响应结构的JSON转换和数据传输
@@ -13,6 +13,10 @@ use axum::{Json, response::IntoResponse};
 // 用途：导入DateTime类型
 // 说明：用于响应时间戳
 use rbatis::rbdc::DateTime;
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(example = "2024-01-01T00:00:00Z")]
+pub struct DateTimeWrapper(pub String);
 
 // 用途：标准API响应结构体
 // 说明：所有API接口的统一响应格式
@@ -32,7 +36,7 @@ pub struct ApiResponse<T> {
     pub data: Option<T>,
     // 用途：时间戳
     // 说明：响应生成的时间，格式为RFC3339
-    pub timestamp: Option<DateTime>,
+    pub timestamp: Option<DateTimeWrapper>,
 }
 
 // 用途：实现ApiResponse的构造函数
@@ -46,7 +50,7 @@ impl<T> ApiResponse<T> {
             code: "0".to_string(),
             message: None,
             data: Some(data),
-            timestamp: Some(DateTime::now()),
+            timestamp: Some(DateTimeWrapper(DateTime::now().to_string())),
         }
     }
 
@@ -58,7 +62,19 @@ impl<T> ApiResponse<T> {
             code: "0".to_string(),
             message: None,
             data: None,
-            timestamp: Some(DateTime::now()),
+            timestamp: Some(DateTimeWrapper(DateTime::now().to_string())),
+        }
+    }
+
+    // 用途：创建带数据的错误响应
+    // 说明：用于需要返回错误码且同时携带业务数据的场景
+    pub fn error_with_data(code: &str, message: &str, data: T) -> Self {
+        Self {
+            success: false,
+            code: code.to_string(),
+            message: Some(message.to_string()),
+            data: Some(data),
+            timestamp: Some(DateTimeWrapper(DateTime::now().to_string())),
         }
     }
 
@@ -70,7 +86,7 @@ impl<T> ApiResponse<T> {
             code: code.to_string(),
             message: Some(message.to_string()),
             data: None,
-            timestamp: Some(DateTime::now()),
+            timestamp: Some(DateTimeWrapper(DateTime::now().to_string())),
         }
     }
 }
@@ -144,7 +160,7 @@ pub struct ErrorResponse {
     pub details: Option<serde_json::Value>,
     // 用途：时间戳
     // 说明：错误发生的时间，格式为RFC3339
-    pub timestamp: Option<DateTime>,
+    pub timestamp: Option<DateTimeWrapper>,
 }
 
 // 用途：实现ErrorResponse的构造函数
@@ -158,7 +174,7 @@ impl ErrorResponse {
             code: code.to_string(),
             message: message.to_string(),
             details: None,
-            timestamp: Some(DateTime::now()),
+            timestamp: Some(DateTimeWrapper(DateTime::now().to_string())),
         }
     }
 
@@ -170,7 +186,7 @@ impl ErrorResponse {
             code: code.to_string(),
             message: message.to_string(),
             details: Some(details),
-            timestamp: Some(DateTime::now()),
+            timestamp: Some(DateTimeWrapper(DateTime::now().to_string())),
         }
     }
 }

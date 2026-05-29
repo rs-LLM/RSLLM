@@ -44,7 +44,9 @@ pub async fn get_overview_stats() -> Result<Json<ApiResponse<AdminOverviewStatsV
     get,
     path = "/admin/stats/trends",
     params(
-        ("dimension" = String, Query, description = "时间维度：day/week/month", example = "day")
+        ("dimension" = String, Query, description = "时间维度：day/week/month", example = "day"),
+        ("start_date" = Option<String>, Query, description = "开始日期，格式 YYYY-MM-DD", example = "2026-02-01"),
+        ("end_date" = Option<String>, Query, description = "结束日期，格式 YYYY-MM-DD", example = "2026-02-27")
     ),
     responses(
         (status = 200, description = "查询成功", body = ApiResponse<AdminTrendStatsVO>),
@@ -72,7 +74,13 @@ pub async fn get_trend_stats(
     // 创建AdminStatsService实例
     let admin_stats_service = AdminStatsService::new();
 
-    let stats = admin_stats_service.get_trend_stats(dimension).await?;
+    let stats = admin_stats_service
+        .get_trend_stats(
+            dimension,
+            params.start_date.clone(),
+            params.end_date.clone(),
+        )
+        .await?;
 
     Ok(Json(ApiResponse::success(stats)))
 }
@@ -84,7 +92,9 @@ pub async fn get_trend_stats(
     get,
     path = "/admin/stats/users",
     params(
-        ("dimension" = String, Query, description = "时间维度：day/week/month", example = "day")
+        ("dimension" = String, Query, description = "时间维度：day/week/month", example = "day"),
+        ("start_date" = Option<String>, Query, description = "开始日期，格式 YYYY-MM-DD", example = "2026-02-01"),
+        ("end_date" = Option<String>, Query, description = "结束日期，格式 YYYY-MM-DD", example = "2026-02-27")
     ),
     responses(
         (status = 200, description = "查询成功", body = ApiResponse<AdminUserStatsVO>),
@@ -112,7 +122,13 @@ pub async fn get_user_stats(
     // 创建AdminStatsService实例
     let admin_stats_service = AdminStatsService::new();
 
-    let stats = admin_stats_service.get_user_stats(dimension).await?;
+    let stats = admin_stats_service
+        .get_user_stats(
+            dimension,
+            params.start_date.clone(),
+            params.end_date.clone(),
+        )
+        .await?;
 
     Ok(Json(ApiResponse::success(stats)))
 }
@@ -147,13 +163,15 @@ pub async fn refresh_stats() -> Result<Json<ApiResponse<String>>> {
 /// 趋势统计查询参数
 #[derive(Debug, Deserialize)]
 pub struct TrendStatsQueryDTO {
-    /// 时间维度：day/week/month
     pub dimension: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
 }
 
 /// 用户统计查询参数
 #[derive(Debug, Deserialize)]
 pub struct UserStatsQueryDTO {
-    /// 时间维度：day/week/month
     pub dimension: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
 }
